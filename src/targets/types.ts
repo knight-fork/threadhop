@@ -29,6 +29,12 @@ export interface TargetAdapter {
   /** Native resume by exact ID may be absent even when transcript bootstrap works. */
   supportsNativeResume?: boolean;
   supportsNativeImport?: boolean;
+  /**
+   * Whether `fabricate` honours `opts.existingSessionId` by rewriting that
+   * session in place. Adapters without it would mint a new session instead,
+   * so callers must check this before asking for an update.
+   */
+  supportsUpdateInPlace?: boolean;
   isInstalled(): Promise<boolean>;
   /** Native resume for a conversation that originated in this CLI. */
   nativeResume(sessionId: string, cwd: string): LaunchPlan;
@@ -39,14 +45,40 @@ export interface TargetAdapter {
    * `replayReasoning` governs whether opaque `reasoning` events are replayed
    * verbatim where the target supports it (Codex only, gated per-event on
    * `producer.source === "codex"` — most targets ignore the flag entirely).
+   * `existingSessionId`, on adapters with `supportsUpdateInPlace`, rewrites
+   * that previously fabricated session instead of creating a new one, and
+   * throws MirrorDivergedError (leaving the file untouched) when the session
+   * holds anything turnbridge would not write itself, such as turns the user
+   * added after resuming it.
    */
   fabricate(
     summary: ConversationSummary,
     cwd: string,
-    opts: { replayReasoning: boolean },
+    opts: FabricateOptions,
   ): Promise<LaunchPlan>;
   /** Honest fallback: fresh session instructed to read the transcript file. */
   bootstrap(summary: ConversationSummary, cwd: string, transcriptPath: string): LaunchPlan;
+}
+
+export interface FabricateOptions {
+  replayReasoning: boolean;
+  /** Rewrite this previously fabricated session in place (see supportsUpdateInPlace). */
+  existingSessionId?: string | undefined;
+}
+
+/**
+ * The session asked to be updated in place has content turnbridge did not
+ * write, so rewriting it would destroy that content. Callers fall back to a
+ * new session; this is not a format failure and must not trigger bootstrap.
+ */
+export class MirrorDivergedError extends Error {
+  constructor(
+    message: string,
+    public readonly cliName: CliName,
+    public readonly sessionId: string,
+  ) {
+    super(message);
+  }
 }
 
 export class FabricationUnsupportedError extends Error {

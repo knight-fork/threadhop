@@ -2,11 +2,12 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { normalizeTimestamp } from "../timestamps.js";
 import { formatSize, transcriptSize } from "../transcript.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { bootstrapPrompt } from "../bootstrap.js";
 import { binaryOnPath } from "../launch.js";
+import { eventKeys, stableUuid } from "../stable-id.js";
 import { toolInput } from "../tool-input.js";
 import {
   cliLabel,
@@ -15,7 +16,13 @@ import {
   type ConversationSummary,
   type TurnBlock,
 } from "../types.js";
-import { FabricationUnsupportedError, type LaunchPlan, type TargetAdapter } from "./types.js";
+import {
+  FabricationUnsupportedError,
+  MirrorDivergedError,
+  type FabricateOptions,
+  type LaunchPlan,
+  type TargetAdapter,
+} from "./types.js";
 
 /**
  * Session writer validated against Claude Code 2.1.x (2026-07): resume looks
@@ -70,6 +77,8 @@ export function conversationLines(lines: FabricatedLine[]): SessionLine[] {
 }
 
 interface LineSpec {
+  /** Identity of the line within its session; its uuid is derived from it. */
+  key: string;
   type: "user" | "assistant";
   content: unknown;
   timestamp: string;
@@ -85,9 +94,10 @@ interface LineSpec {
 function convertBlocks(
   blocks: TurnBlock[],
   seenToolUseIds: Set<string>,
+  fallbackToolId: (blockIndex: number) => string,
 ): unknown[] {
   const out: unknown[] = [];
-  for (const block of blocks) {
+  for (const [blockIndex, block] of blocks.entries()) {
     switch (block.type) {
       case "text":
         if (typeof block.text === "string" && block.text.trim()) {
@@ -98,7 +108,7 @@ function convertBlocks(
         if (block.text) out.push({ type: "text", text: `[visible thinking]\n${String(block.text)}` });
         break;
       case "tool_use": {
-        const id = typeof block.id === "string" ? block.id : `toolu_tb_${randomUUID().slice(0, 8)}`;
+        const id = typeof block.id === "string" ? block.id : fallbackToolId(blockIndex);
         seenToolUseIds.add(id);
         const input = toolInput(block.input);
         out.push({ type: "tool_use", id, name: block.name ?? "ImportedTool", input });
@@ -164,6 +174,7 @@ export function buildSessionLines(
 ): FabricatedLine[] {
   const specs: LineSpec[] = [
     {
+      key: "notice",
       type: "user",
       // Fabrication time, which is *newer* than every history line below it, so
       // the file steps backward exactly once at line 1. Verified deliberate, not
@@ -187,14 +198,21 @@ export function buildSessionLines(
   ];
 
   const seenToolUseIds = new Set<string>();
+  const keyFor = eventKeys();
   for (const event of summary.events) {
     const content = turnContent(event);
     if (!content) continue;
-    const blocks = convertBlocks(content.blocks, seenToolUseIds);
+    const key = `event:${keyFor(event.id)}`;
+    const blocks = convertBlocks(
+      content.blocks,
+      seenToolUseIds,
+      (blockIndex) => `toolu_tb_${stableUuid(`${sessionId}:${key}:tool:${blockIndex}`).slice(0, 8)}`,
+    );
     if (blocks.length === 0) continue;
     // tool results ride on user lines in Claude's format
     const type = content.role === "user" || event.actor.type === "human" || content.role === "tool_result" ? "user" : "assistant";
     const spec: LineSpec = {
+      key,
       type,
       content: blocks,
       timestamp: normalizeTimestamp(event.occurred_at, now),
@@ -209,7 +227,10 @@ export function buildSessionLines(
   const lines: SessionLine[] = [];
   let parentUuid: string | null = null;
   for (const spec of specs) {
-    const uuid = randomUUID();
+    // Derived, not random: rebuilding the same history for the same session
+    // yields the same uuids and parentUuid chain, which is what lets an
+    // in-place update tell its own earlier lines from lines Claude appended.
+    const uuid = stableUuid(`${sessionId}:${spec.key}`);
     const message: Record<string, unknown> =
       spec.type === "assistant"
         ? {
@@ -245,9 +266,66 @@ export function buildSessionLines(
   return [...lines, { type: "ai-title", aiTitle: pickerTitle(summary), sessionId }];
 }
 
+async function readExisting(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/**
+ * How to bring an existing fabricated session up to date with `next`, or why
+ * it can't be. Claude Code appends its own session-state records to a file
+ * the moment it is opened, even with nothing typed — verified on 2.1.316:
+ * `atis-latch`, `cost-state`, `file-history-snapshot`, `mode`,
+ * `permission-mode`. None carries a `uuid`, so none is part of the parentUuid
+ * chain, and they hold the user's state (permission mode, cost), so they are
+ * kept rather than rewritten away.
+ *
+ * Chain lines — anything with a `uuid` — must all be turnbridge's, in order,
+ * a prefix of what it would write now (uuids derive from the session id and
+ * source events, so the prefix holds while the source only grows). Then the
+ * update is simply appending the rest: their parentUuids already continue
+ * from the last existing line. A chain line turnbridge did not write means
+ * the session was continued after resuming, which is divergence: refusing is
+ * recoverable, overwriting a user's turns is not.
+ */
+export function planSessionAppend(
+  existing: string,
+  next: FabricatedLine[],
+): { reason: string } | { append: FabricatedLine[] } {
+  const ours = conversationLines(next);
+  let matched = 0;
+  let hasTitle = false;
+  for (const raw of existing.split("\n")) {
+    if (!raw.trim()) continue;
+    let line: { type?: unknown; uuid?: unknown };
+    try {
+      line = JSON.parse(raw) as { type?: unknown; uuid?: unknown };
+    } catch {
+      return { reason: "has a line that is not JSON" };
+    }
+    if (line.type === "ai-title") {
+      hasTitle = true;
+      continue;
+    }
+    if (typeof line.uuid !== "string") continue;
+    if (matched >= ours.length || line.uuid !== ours[matched]!.uuid) {
+      return { reason: "has conversation lines turnbridge did not write (was it continued after resuming?)" };
+    }
+    matched++;
+  }
+  const append: FabricatedLine[] = ours.slice(matched);
+  if (!hasTitle) append.push(...next.filter((line) => line.type === "ai-title"));
+  return { append };
+}
+
 export const claudeCodeTarget: TargetAdapter = {
   name: "claude-code",
   binary: "claude",
+  supportsUpdateInPlace: true,
 
   isInstalled() {
     return binaryOnPath("claude");
@@ -265,7 +343,7 @@ export const claudeCodeTarget: TargetAdapter = {
   // `opts.replayReasoning` doesn't apply here: only Codex issues opaque
   // reasoning ciphertext, and it can't be forged as a native Claude Code
   // reasoning item, so there is nothing for this target to replay.
-  async fabricate(summary: ConversationSummary, cwd: string): Promise<LaunchPlan> {
+  async fabricate(summary: ConversationSummary, cwd: string, opts: FabricateOptions): Promise<LaunchPlan> {
     const version = claudeVersion();
     if (!version) {
       throw new FabricationUnsupportedError("could not determine claude version", "claude-code");
@@ -278,7 +356,7 @@ export const claudeCodeTarget: TargetAdapter = {
       );
     }
 
-    const sessionId = randomUUID();
+    const sessionId = opts.existingSessionId ?? randomUUID();
     // resume lookup is scoped to the project dir encoded from the launch cwd
     const dir = join(projectsDir(), encodeProjectDir(cwd));
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -293,12 +371,37 @@ export const claudeCodeTarget: TargetAdapter = {
       importedSourceEventIds,
     );
     const body = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
-    await writeFile(path, body, { mode: 0o600, flag: "wx" });
 
-    notes.push(
-      `fabricated Claude Code session ${sessionId} from ${cliLabel(summary.source)} history (${summary.turnCount} turns)`,
-      `session file: ${path} (${formatSize(transcriptSize(body))})`,
-    );
+    const existing = opts.existingSessionId ? await readExisting(path) : null;
+    if (existing === null) {
+      await writeFile(path, body, { mode: 0o600, flag: "wx" });
+      notes.push(
+        `fabricated Claude Code session ${sessionId} from ${cliLabel(summary.source)} history (${summary.turnCount} turns)`,
+        `session file: ${path} (${formatSize(transcriptSize(body))})`,
+      );
+    } else {
+      const plan = planSessionAppend(existing, lines);
+      if ("reason" in plan) {
+        throw new MirrorDivergedError(
+          `Claude Code session ${sessionId} ${plan.reason}; leaving it untouched`,
+          "claude-code",
+          sessionId,
+        );
+      }
+      // Append, as Claude itself does, rather than replace: its own records
+      // stay where they are and a concurrent Claude write is never clobbered.
+      if (plan.append.length > 0) {
+        const separator = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+        await appendFile(path, separator + plan.append.map((l) => JSON.stringify(l)).join("\n") + "\n");
+      }
+      const added = conversationLines(plan.append).length;
+      notes.push(
+        added > 0
+          ? `updated Claude Code session ${sessionId} from ${cliLabel(summary.source)} history (+${added} line${added === 1 ? "" : "s"}, ${summary.turnCount} turns)`
+          : `Claude Code session ${sessionId} is already up to date with ${cliLabel(summary.source)} history`,
+        `session file: ${path}`,
+      );
+    }
     return {
       command: "claude",
       args: ["--resume", sessionId],

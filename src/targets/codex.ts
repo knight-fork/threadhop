@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { toolInput } from "../tool-input.js";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { parse } from "smol-toml";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ import { bootstrapPrompt } from "../bootstrap.js";
 import { normalizeTimestamp } from "../timestamps.js";
 import { formatSize, transcriptSize } from "../transcript.js";
 import { binaryOnPath } from "../launch.js";
+import { eventKeys, stableUuid } from "../stable-id.js";
+import { replaceAtomically } from "../atomic-write.js";
 import {
   cliLabel,
   importSourceLabel,
@@ -17,7 +19,13 @@ import {
   type ConversationSummary,
   type TurnBlock,
 } from "../types.js";
-import { FabricationUnsupportedError, type LaunchPlan, type TargetAdapter } from "./types.js";
+import {
+  FabricationUnsupportedError,
+  MirrorDivergedError,
+  type FabricateOptions,
+  type LaunchPlan,
+  type TargetAdapter,
+} from "./types.js";
 
 /**
  * Rollout writer validated against codex-cli 0.144.x, 0.145.x and 0.146.x
@@ -74,7 +82,7 @@ function foldBlock(block: TurnBlock): string {
   }
 }
 
-interface RolloutLine {
+export interface RolloutLine {
   timestamp: string;
   type: string;
   payload: Record<string, unknown>;
@@ -249,6 +257,7 @@ export function buildRolloutLines(
   // call_ids seen so far, so a tool_result can tell a real pairing from an
   // orphan whose matching call never made it into this conversation
   const seenCallIds = new Set<string>();
+  const keyFor = eventKeys();
   for (const event of summary.events) {
     if (event.kind === "reasoning") {
       if (!replayReasoning || event.producer.source !== "codex") continue;
@@ -262,6 +271,7 @@ export function buildRolloutLines(
     const content = turnContent(event);
     if (!content) continue;
     const lineCountBefore = lines.length;
+    const key = `event:${keyFor(event.id)}`;
     const ts = normalizeTimestamp(event.occurred_at, now);
     const role = event.actor.type === "human" ? "user" : "assistant";
 
@@ -274,10 +284,13 @@ export function buildRolloutLines(
       if (text) lines.push(...turnLines(ts, role, text));
     };
 
-    for (const block of content.blocks) {
+    for (const [blockIndex, block] of content.blocks.entries()) {
       if (block.type === "tool_use") {
+        // derived, not random, so rebuilding the same history reproduces it
         const callId =
-          typeof block.id === "string" && block.id ? block.id : `call_tb_${randomUUID().slice(0, 12)}`;
+          typeof block.id === "string" && block.id
+            ? block.id
+            : `call_tb_${stableUuid(`${sessionId}:${key}:tool:${blockIndex}`).slice(0, 12)}`;
         const name = typeof block.name === "string" && block.name ? block.name : "ImportedTool";
         seenCallIds.add(callId);
         flushProse();
@@ -312,9 +325,62 @@ export function buildRolloutLines(
   return lines;
 }
 
+/**
+ * session_meta plus the import notice's two lines (model record and display
+ * twin). The notice text tracks the replayed-reasoning count, so it may
+ * legitimately change between writes; everything after it is history.
+ */
+export const ROLLOUT_HEADER_LINES = 3;
+
+/** The rollout file for `sessionId` under Codex's dated session tree, if any. */
+async function findRollout(sessionId: string): Promise<string | null> {
+  let entries: string[];
+  try {
+    entries = await readdir(sessionsDir(), { recursive: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const match = entries.find((entry) => entry.endsWith(`-${sessionId}.jsonl`));
+  return match ? join(sessionsDir(), match) : null;
+}
+
+/**
+ * Why rewriting `existing` with `next` would lose content, or null when it is
+ * safe: the file is this session's, and every history line after the header
+ * is, in order, the line turnbridge would write now. Codex appends turns and
+ * turn-context records when a session is continued, and those show up here as
+ * lines turnbridge did not write.
+ */
+export function rolloutDivergence(existing: string, next: RolloutLine[], sessionId: string): string | null {
+  const raw = existing.split("\n").filter((line) => line.trim());
+  let parsed: unknown[];
+  try {
+    parsed = raw.map((line) => JSON.parse(line) as unknown);
+  } catch {
+    return "has a line that is not JSON";
+  }
+  const meta = parsed[0] as { type?: unknown; payload?: { id?: unknown } } | undefined;
+  if (meta?.type !== "session_meta" || meta.payload?.id !== sessionId) {
+    return "does not start with this session's session_meta";
+  }
+  const history = parsed.slice(ROLLOUT_HEADER_LINES);
+  const ours = next.slice(ROLLOUT_HEADER_LINES);
+  if (history.length > ours.length) {
+    return "has lines turnbridge did not write (was it continued after resuming?)";
+  }
+  for (const [index, line] of history.entries()) {
+    if (JSON.stringify(line) !== JSON.stringify(ours[index])) {
+      return "has lines turnbridge did not write (was it continued after resuming?)";
+    }
+  }
+  return null;
+}
+
 export const codexTarget: TargetAdapter = {
   name: "codex",
   binary: "codex",
+  supportsUpdateInPlace: true,
 
   isInstalled() {
     return binaryOnPath("codex");
@@ -332,7 +398,7 @@ export const codexTarget: TargetAdapter = {
   async fabricate(
     summary: ConversationSummary,
     cwd: string,
-    opts: { replayReasoning: boolean },
+    opts: FabricateOptions,
   ): Promise<LaunchPlan> {
     const version = codexVersion();
     if (!version) {
@@ -354,12 +420,14 @@ export const codexTarget: TargetAdapter = {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new FabricationUnsupportedError("could not read Codex's configured provider; native import would risk changing provider", "codex");
     }
-    const sessionId = randomUUID();
+    const sessionId = opts.existingSessionId ?? randomUUID();
     const now = new Date();
+    const existingPath = opts.existingSessionId ? await findRollout(sessionId) : null;
     const { datePath, stamp } = localStamp(now);
     const dir = join(sessionsDir(), datePath);
     await mkdir(dir, { recursive: true, mode: 0o700 });
-    const path = join(dir, `rollout-${stamp}-${sessionId}.jsonl`);
+    // an update keeps the original file, whose name carries its creation time
+    const path = existingPath ?? join(dir, `rollout-${stamp}-${sessionId}.jsonl`);
     const importedSourceEventIds: string[] = [];
     const lines = buildRolloutLines(
       summary,
@@ -372,10 +440,18 @@ export const codexTarget: TargetAdapter = {
       modelProvider,
     );
     const body = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
-    await writeFile(path, body, { mode: 0o600, flag: "wx" });
+    if (existingPath) {
+      const reason = rolloutDivergence(await readFile(existingPath, "utf8"), lines, sessionId);
+      if (reason) {
+        throw new MirrorDivergedError(`Codex session ${sessionId} ${reason}; leaving it untouched`, "codex", sessionId);
+      }
+      await replaceAtomically(path, body);
+    } else {
+      await writeFile(path, body, { mode: 0o600, flag: "wx" });
+    }
 
     notes.push(
-      `fabricated Codex session ${sessionId} from ${cliLabel(summary.source)} history (${summary.turnCount} turns)`,
+      `${existingPath ? "updated" : "fabricated"} Codex session ${sessionId} from ${cliLabel(summary.source)} history (${summary.turnCount} turns)`,
       `rollout file: ${path} (${formatSize(transcriptSize(body))})`,
     );
     const droppedModelNote = modelDropNote(summary);

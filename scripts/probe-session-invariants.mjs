@@ -3,7 +3,7 @@
 // declined to do: fabricate a baseline Claude session, then write deliberately
 // malformed variants of it and see what `claude --resume` does with each.
 //
-// The point is not to start shipping malformed files — turnbridge satisfies
+// The point is not to start shipping malformed files — threadhop satisfies
 // every one of these invariants by construction, and fabricate-invariants.test.ts
 // keeps it that way. The point is to know whether the invariants are load-bearing
 // or merely tidy, so future work (partial history, lineage splicing, a
@@ -26,10 +26,10 @@ const PROMPT =
 // process's cwd resolves to /private/var/..., and claude encodes the project
 // dir from *its* cwd. Fabricating under the unresolved path files the session
 // where resume will never look.
-const dir = await realpath(await mkdtemp(join(tmpdir(), "turnbridge-inv-")));
+const dir = await realpath(await mkdtemp(join(tmpdir(), "threadhop-inv-")));
 await git(["init", "-q", "-b", "main"], { cwd: dir });
-await git(["config", "user.email", "probe@turnbridge.test"], { cwd: dir });
-await git(["config", "user.name", "Turnbridge Probe"], { cwd: dir });
+await git(["config", "user.email", "probe@threadhop.test"], { cwd: dir });
+await git(["config", "user.name", "Threadhop Probe"], { cwd: dir });
 await git(["config", "commit.gpgsign", "false"], { cwd: dir });
 await writeFile(join(dir, "README.md"), "probe\n");
 await git(["add", "."], { cwd: dir });
@@ -42,9 +42,9 @@ const turn = (role, text, seq) => ({
   occurred_at: `2026-01-01T00:00:0${seq}.000Z`,
   actor:
     role === "user"
-      ? { type: "human", id: "probe@turnbridge.test" }
+      ? { type: "human", id: "probe@threadhop.test" }
       : { type: "agent", id: "probe-model" },
-  producer: { tool: "turnbridge-probe", source: "codex", session_id: conversationId.split(":")[1] },
+  producer: { tool: "threadhop-probe", source: "codex", session_id: conversationId.split(":")[1] },
   conversation: { id: conversationId, seq },
   content: { role, blocks: [{ type: "text", text }] },
 });
@@ -72,7 +72,7 @@ console.log(`baseline session ${baselineId} (${baseline.length} lines) in ${sess
 const VARIANTS = {
   baseline: (lines) => lines,
 
-  // What turnbridge ships today, stated explicitly: line 1 (our synthetic
+  // What threadhop ships today, stated explicitly: line 1 (our synthetic
   // import notice) is stamped at fabrication time and is therefore NEWER than
   // every history line beneath it. Confirms the current file is loadable.
   "notice-newest": (lines) => lines,

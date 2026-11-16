@@ -9,7 +9,7 @@ import {
   type RepoInfo,
 } from "conversation-ledger";
 
-export async function makeTempRepo(prefix = "turnbridge-test-"): Promise<RepoInfo> {
+export async function makeTempRepo(prefix = "threadhop-test-"): Promise<RepoInfo> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   await git(["init", "-q", "-b", "main"], { cwd: dir });
   await git(["config", "user.email", "test@example.com"], { cwd: dir });
@@ -58,7 +58,7 @@ export function turnDraft(conversationId: string, source: string, spec: TurnSpec
     occurred_at: spec.occurredAt ?? `2026-01-01T00:00:${String(spec.seq).padStart(2, "0")}.000Z`,
     actor,
     producer: {
-      tool: "turnbridge-test",
+      tool: "threadhop-test",
       source,
       session_id: conversationId.split(":").slice(1).join(":"),
       ...(!isHuman
@@ -105,7 +105,7 @@ export function reasoningEventDraft(
     occurred_at: occurredAt,
     actor: { type: "agent" },
     producer: {
-      tool: "turnbridge-test",
+      tool: "threadhop-test",
       source: spec.source ?? source,
       session_id: sessionId,
     },

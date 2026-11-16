@@ -69,7 +69,7 @@ provider requests and automatic ledger observations before any backfill.
 2. Installed scripted-provider drivers check continuation, tools, capture, lineage
    and native resume. `smoke:interactive` now uses disposable profiles, and the
    old script is a compatibility wrapper.
-3. All twenty targets have bootstrap syntax. `turnbridge targets` separates native
+3. All twenty targets have bootstrap syntax. `threadhop targets` separates native
    import, exact native resume and bootstrap. Pi/Qwen/Gemini fold foreign tools, visible
    thinking and attachment references into labeled text, preserving content without
    claiming executable native foreign calls.
@@ -94,8 +94,8 @@ a retained `source-snapshot.json` to establish a real installed-source bridge.
 `verify:program` provisions source captures and runs the hub graph automatically;
 `--hub` and `--only` bound a local campaign. `--sources FILE` supplies an explicit
 CLI-to-source-snapshot mapping; those seeds remain immutable across the run. `--runtime-dir` loads the pinned npm
-runtime manifest; native/Python binary overrides use `TURNBRIDGE_VERIFY_*_BINARY`
-and Aider's interpreter uses `TURNBRIDGE_AIDER_PYTHON` (preserve its venv path).
+runtime manifest; native/Python binary overrides use `THREADHOP_VERIFY_*_BINARY`
+and Aider's interpreter uses `THREADHOP_AIDER_PYTHON` (preserve its venv path).
 
 Reports retain fail, blocked and unsupported results. Exploratory local runs succeed
 only if they earn installed bridge passes. Hosted CI adds `--require-core true`,
@@ -107,13 +107,13 @@ exact-ID resume prevents satisfying the full continuation certification.
 
 The production PTY handoff is exercised inside the test PTY for targets without
 an interactive prompt flag. Folder-trust input is forwarded before prompt
-submission; Turnbridge waits for a real composer and an echoed prompt. It never
+submission; Threadhop waits for a real composer and an echoed prompt. It never
 automatically accepts user trust/approval dialogs. Tests may accept only their
 synthetic fixture folders and enable benign reads for the scripted provider.
 Kilo's fixture sets [`snapshot: false`](https://kilo.ai/docs/code-with-ai/features/checkpoints)
 because hosted resume can stall in snapshot initialization before inference.
 Its reports explicitly exclude filesystem checkpoint/rollback behavior; normal
-Turnbridge launches retain the contributor's own native configuration.
+Threadhop launches retain the contributor's own native configuration.
 
 See the [initial macOS observations](verification-evidence/2026-10-06-macos-summary.md) for the current proof boundary.
 

@@ -6,7 +6,7 @@ import test from "node:test";
 import { configuredModels } from "../targets/opencode.js";
 
 test("configured model discovery uses the selected CLI and tolerates invalid debug output", async () => {
-  const root = await mkdtemp(join(tmpdir(), "turnbridge-model-config-"));
+  const root = await mkdtemp(join(tmpdir(), "threadhop-model-config-"));
   try {
     const binary = join(root, "kilo-fixture");
     await writeFile(binary, `#!${process.execPath}

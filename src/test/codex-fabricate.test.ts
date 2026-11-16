@@ -206,7 +206,7 @@ function toolDraft(conversationId: string, seq: number, role: string, blocks: un
       role === "user"
         ? { type: "human" as const, id: "me@x.com" }
         : { type: "agent" as const, id: "claude-test" },
-    producer: { tool: "turnbridge-test", source: "claude-code", session_id: TOOL_SID },
+    producer: { tool: "threadhop-test", source: "claude-code", session_id: TOOL_SID },
     stream: { id: conversationId, seq },
     content: { role, blocks },
   };

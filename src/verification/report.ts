@@ -29,5 +29,5 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch(error => { process.stderr.write(`turnbridge verification: ${String(error)}\n`); process.exitCode = 1; });
+  main().catch(error => { process.stderr.write(`threadhop verification: ${String(error)}\n`); process.exitCode = 1; });
 }

@@ -2,7 +2,7 @@
  * conversation-ledger reads perform lazy maintenance — absorbing fetched
  * transport refs and auto re-anchoring after squash/rebase rewrites — and
  * report it by writing directly to stderr. Left alone, those notices can
- * interleave with turnbridge's own stderr-rendered picker UI mid-line.
+ * interleave with threadhop's own stderr-rendered picker UI mid-line.
  */
 
 type StderrWrite = typeof process.stderr.write;

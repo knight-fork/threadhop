@@ -7,7 +7,7 @@ import { rename, writeFile } from "node:fs/promises";
  * directory, so the rename stays on one filesystem and is atomic.
  */
 export async function replaceAtomically(path: string, body: string): Promise<void> {
-  const tmp = `${path}.turnbridge-${randomUUID().slice(0, 8)}.tmp`;
+  const tmp = `${path}.threadhop-${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(tmp, body, { mode: 0o600, flag: "wx" });
   await rename(tmp, path);
 }

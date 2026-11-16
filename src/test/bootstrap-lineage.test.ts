@@ -16,7 +16,7 @@ test("late bootstrap capture links exact sessions and restores history across ho
       sourceEventIds: before[0]!.events.map(e => e.id), version: "test" });
     assert.equal(await reconcileBootstrapContinuations(repo), 0);
     await seedConversation(repo, "qwen-code:child", "qwen-code", [
-      { role: "user", text: `[turnbridge bootstrap ${token}] fresh session`, seq: 0, occurredAt: new Date().toISOString() },
+      { role: "user", text: `[threadhop bootstrap ${token}] fresh session`, seq: 0, occurredAt: new Date().toISOString() },
       { role: "assistant", text: "context loaded", seq: 1, occurredAt: new Date().toISOString() },
       { role: "user", text: "new work", seq: 2, occurredAt: new Date().toISOString() },
     ]);
@@ -37,7 +37,7 @@ test("ambiguous copied bootstrap markers do not attach arbitrary sessions", asyn
   const repo = await makeTempRepo(), token = randomUUID();
   try {
     await recordPendingBootstrap(repo, { token, source: "codex:origin", targetCli: "pi", importedThroughSeq: 0, sourceEventIds: [], version: "test" });
-    for (const id of ["pi:a", "pi:b"]) await seedConversation(repo, id, "pi", [{ role: "user", text: `[turnbridge bootstrap ${token}]`, seq: 0 }]);
+    for (const id of ["pi:a", "pi:b"]) await seedConversation(repo, id, "pi", [{ role: "user", text: `[threadhop bootstrap ${token}]`, seq: 0 }]);
     assert.equal(await reconcileBootstrapContinuations(repo), 0);
     assert.equal((await readLineage(repo, true)).parentOf.size, 0);
   } finally { await cleanupRepo(repo); }

@@ -225,7 +225,7 @@ export function buildRolloutLines(
   // records (history the model reads, never re-executed), except unpaired
   // results, which stay prose.
   const noticeText =
-    `[turnbridge import notice] This conversation was imported from ${importSourceLabel(summary)}. ` +
+    `[threadhop import notice] This conversation was imported from ${importSourceLabel(summary)}. ` +
     "The history below is the literal visible transcript. Past tool calls are replayed as history " +
     "records, not as calls to re-run; tool results with no matching call appear as labeled text. " +
     (replayCount > 0
@@ -348,9 +348,9 @@ async function findRollout(sessionId: string): Promise<string | null> {
 /**
  * Why rewriting `existing` with `next` would lose content, or null when it is
  * safe: the file is this session's, and every history line after the header
- * is, in order, the line turnbridge would write now. Codex appends turns and
+ * is, in order, the line threadhop would write now. Codex appends turns and
  * turn-context records when a session is continued, and those show up here as
- * lines turnbridge did not write.
+ * lines threadhop did not write.
  */
 export function rolloutDivergence(existing: string, next: RolloutLine[], sessionId: string): string | null {
   const raw = existing.split("\n").filter((line) => line.trim());
@@ -367,11 +367,11 @@ export function rolloutDivergence(existing: string, next: RolloutLine[], session
   const history = parsed.slice(ROLLOUT_HEADER_LINES);
   const ours = next.slice(ROLLOUT_HEADER_LINES);
   if (history.length > ours.length) {
-    return "has lines turnbridge did not write (was it continued after resuming?)";
+    return "has lines threadhop did not write (was it continued after resuming?)";
   }
   for (const [index, line] of history.entries()) {
     if (JSON.stringify(line) !== JSON.stringify(ours[index])) {
-      return "has lines turnbridge did not write (was it continued after resuming?)";
+      return "has lines threadhop did not write (was it continued after resuming?)";
     }
   }
   return null;
@@ -461,7 +461,7 @@ export const codexTarget: TargetAdapter = {
       notes.push(
         `replayed ${replayCount} encrypted reasoning block(s) from the original Codex session verbatim ` +
           "(may restore hidden reasoning provider-side; disable with reasoningReplay: false in " +
-          "~/.turnbridge/config.json or --no-reasoning-replay)",
+          "~/.threadhop/config.json or --no-reasoning-replay)",
       );
     }
     return {

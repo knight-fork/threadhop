@@ -1,5 +1,5 @@
 {
-  "schema": "turnbridge-runtimes/1",
+  "schema": "threadhop-runtimes/1",
   "cledger": "f9853f7b38ee1fefdb587748055a18e240efb48c",
   "annals": "dcd06c0f724cf3509b2d61dce7d0b537d4d86340",
   "npm": [

@@ -13,7 +13,7 @@ import { installedTargets, targetFor } from "./targets/index.js";
 import { formatSize } from "./transcript.js";
 import { FabricationUnsupportedError, type LaunchPlan, type TargetAdapter } from "./targets/types.js";
 import { cliLabel, type CliName, type ConversationSummary } from "./types.js";
-import { turnbridgeVersion } from "./version.js";
+import { threadhopVersion } from "./version.js";
 
 export interface ResumeFlags {
   target?: CliName | undefined;
@@ -80,7 +80,7 @@ async function chooseTarget(flags: ResumeFlags): Promise<TargetAdapter | null> {
 
   const installed = await installedTargets();
   if (installed.length === 0) {
-    process.stderr.write("turnbridge: no supported target CLI found on PATH (wrapper targets also need cledger)\n");
+    process.stderr.write("threadhop: no supported target CLI found on PATH (wrapper targets also need cledger)\n");
     return null;
   }
   if (installed.length === 1) return installed[0]!;
@@ -94,7 +94,7 @@ async function chooseTarget(flags: ResumeFlags): Promise<TargetAdapter | null> {
   if (await confirm(`Make ${cliLabel(choice.name)} your default target?`)) {
     await saveConfig({ ...(await loadConfig()), defaultTarget: choice.name });
     process.stderr.write(
-      `turnbridge: default target saved (change via ~/.turnbridge/config.json)\n`,
+      `threadhop: default target saved (change via ~/.threadhop/config.json)\n`,
     );
   }
   return choice;
@@ -129,7 +129,7 @@ export async function buildPlan(
           importedThroughSeq: lastSeq,
           sourceEventIds: plan.importedSourceEventIds ?? [],
           targetCli: target.name,
-          version: turnbridgeVersion(),
+          version: threadhopVersion(),
         });
       }
       return plan;
@@ -137,7 +137,7 @@ export async function buildPlan(
       if (!(err instanceof FabricationUnsupportedError)) throw err;
       nativeImportFallback = { kind: err.kind, reason: err.message };
       process.stderr.write(
-        `turnbridge: ${err.message}; falling back to bootstrap rehydration\n`,
+        `threadhop: ${err.message}; falling back to bootstrap rehydration\n`,
       );
     }
   }
@@ -147,7 +147,7 @@ export async function buildPlan(
   if (nativeImportFallback) plan.nativeImportFallback = nativeImportFallback;
   await recordPendingBootstrap(repo, { token: bootstrapSummary.bootstrapToken, source: summary.id, targetCli: target.name,
     importedThroughSeq: Math.max(...summary.events.map(event => event.stream?.seq ?? 0), 0),
-    sourceEventIds: history.summary.events.map(event => event.id), version: turnbridgeVersion() });
+    sourceEventIds: history.summary.events.map(event => event.id), version: threadhopVersion() });
   plan.notes.push(...history.notes);
   plan.notes.push(
     `transcript is ${formatSize(transcript.size)}; fitting it is the target CLI's own concern ` +
@@ -160,7 +160,7 @@ export async function resumeCommand(flags: ResumeFlags): Promise<number> {
   const cwd = process.cwd();
   const repo = await findRepo(cwd);
   if (!repo) {
-    process.stderr.write("turnbridge: not inside a git repository\n");
+    process.stderr.write("threadhop: not inside a git repository\n");
     return 1;
   }
   const identity = await gitUserIdentity(repo);
@@ -186,7 +186,7 @@ export async function resumeCommand(flags: ResumeFlags): Promise<number> {
 
   if (conversations.length === 0) {
     process.stderr.write(
-      "turnbridge: no captured conversations for this repo state.\n" +
+      "threadhop: no captured conversations for this repo state.\n" +
         "  - capture runs via conversation-ledger hooks: `cledger install all`\n" +
         "  - `--any-commit` lists conversations from other branches/commits\n" +
         "  - `--all` includes collaborators' conversations\n",
@@ -211,7 +211,7 @@ export async function resumeCommand(flags: ResumeFlags): Promise<number> {
   const target = await chooseTarget(flags);
   if (!target) return 1;
   if (!(await target.isInstalled())) {
-    process.stderr.write(`turnbridge: ${target.binary} is not on PATH\n`);
+    process.stderr.write(`threadhop: ${target.binary} is not on PATH\n`);
     return 1;
   }
 

@@ -64,7 +64,7 @@ const functionCallOutput = (callId = CALL_ID) =>
 
 /** Body lines after session_meta, per variant. */
 const VARIANTS = {
-  // Control: exactly what turnbridge writes today.
+  // Control: exactly what threadhop writes today.
   "text-folded": () => [
     message("user", `The secret marker phrase is ${MARKER}. Remember it.`),
     message("assistant", `[used tool: ${TOOL_NAME}]\ninput: {"file_path":"/tmp/notes.txt"}\n[tool result]\nApplied 1 edit`),
@@ -90,7 +90,7 @@ const requested = process.argv.slice(2);
 // "e2e" is handled after the variant loop, not by it
 const names = (requested.length ? requested : Object.keys(VARIANTS)).filter((n) => n !== "e2e");
 
-const cwd = await mkdtemp(join(tmpdir(), "turnbridge-fc-"));
+const cwd = await mkdtemp(join(tmpdir(), "threadhop-fc-"));
 const env = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !/^(CLAUDE|CLAUDECODE|CODEX_[A-Z])/.test(k)),
 );
@@ -158,17 +158,17 @@ for (const r of results) {
 }
 
 // End-to-end: the variants above prove Codex *accepts* the format, and the
-// unit tests prove turnbridge *emits* it. This proves the actual pipeline —
-// ledger events with tool blocks, through turnbridge's own fabricate(), into a
+// unit tests prove threadhop *emits* it. This proves the actual pipeline —
+// ledger events with tool blocks, through threadhop's own fabricate(), into a
 // live resume — which is the only claim that covers both at once.
 if (!requested.length || requested.includes("e2e")) {
   const { appendEvents, findRepo, git } = await import("conversation-ledger");
   const { listConversations, targetFor } = await import("../dist/index.js");
 
-  const repoDir = await realpath(await mkdtemp(join(tmpdir(), "turnbridge-fc-e2e-")));
+  const repoDir = await realpath(await mkdtemp(join(tmpdir(), "threadhop-fc-e2e-")));
   await git(["init", "-q", "-b", "main"], { cwd: repoDir });
-  await git(["config", "user.email", "probe@turnbridge.test"], { cwd: repoDir });
-  await git(["config", "user.name", "Turnbridge Probe"], { cwd: repoDir });
+  await git(["config", "user.email", "probe@threadhop.test"], { cwd: repoDir });
+  await git(["config", "user.name", "Threadhop Probe"], { cwd: repoDir });
   await git(["config", "commit.gpgsign", "false"], { cwd: repoDir });
   await writeFile(join(repoDir, "README.md"), "probe\n");
   await git(["add", "."], { cwd: repoDir });
@@ -179,8 +179,8 @@ if (!requested.length || requested.includes("e2e")) {
   const draft = (seq, role, blocks) => ({
     kind: "conversation_turn",
     occurred_at: `2026-01-01T00:00:0${seq}.000Z`,
-    actor: role === "user" ? { type: "human", id: "probe@turnbridge.test" } : { type: "agent", id: "claude-probe" },
-    producer: { tool: "turnbridge-probe", source: "claude-code", session_id: cid.split(":")[1] },
+    actor: role === "user" ? { type: "human", id: "probe@threadhop.test" } : { type: "agent", id: "claude-probe" },
+    producer: { tool: "threadhop-probe", source: "claude-code", session_id: cid.split(":")[1] },
     conversation: { id: cid, seq },
     content: { role, blocks },
   });
@@ -205,7 +205,7 @@ if (!requested.length || requested.includes("e2e")) {
   const out = `${run.stdout ?? ""}${run.stderr ?? ""}`;
   const ok = out.includes(MARKER) && out.includes(TOOL_NAME) && run.status === 0;
   console.log(
-    `\ne2e (turnbridge fabricate -> codex resume): ${ok ? "USABLE" : "BROKEN"} ` +
+    `\ne2e (threadhop fabricate -> codex resume): ${ok ? "USABLE" : "BROKEN"} ` +
       `exit=${run.status} marker=${out.includes(MARKER)} tool_named=${out.includes(TOOL_NAME)}`,
   );
   if (!ok) console.log(`  tail: ${out.trim().split("\n").slice(-6).join("\n        ")}`);

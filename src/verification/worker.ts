@@ -53,7 +53,7 @@ export function capturedCompletion(events: EvidenceEvent[], secret: string): boo
 export async function verifyInstalledBridge(options: WorkerOptions) {
   const { root, target: name, mode } = options;
   const repoPath = join(root, "repo"), reportPath = join(root, "report.json");
-  const report = { schema: "turnbridge-installed/1", source: options.source, target: name, mode, platform: process.platform,
+  const report = { schema: "threadhop-installed/1", source: options.source, target: name, mode, platform: process.platform,
     terminal: "interactive", tier: options.localModel?.tier ?? (options.localModel ? "local-model" : "scripted"), sourceProof: options.sourceFile ? "installed-capture" : "canonical-fixture",
     certification: options.sourceFile ? "installed-bridge" : "installed-target-smoke",
     uiMode: (name === "qwen-code" ? "screen-reader" : name === "opencode" && options.source === "gemini-cli" && mode === "native-import" ? "native-export" : "standard") as UiMode, sourceUiMode: "standard" as UiMode,
@@ -69,7 +69,7 @@ export async function verifyInstalledBridge(options: WorkerOptions) {
     await mkdir(repoPath, { recursive: true });
     await checked("git", ["init", "-q", "-b", "main"]);
     await writeFile(join(repoPath, ".cledger.json"), JSON.stringify({ transport: { hook: false, fetchRefspec: false } }));
-    await writeFile(join(repoPath, "README.md"), "Turnbridge disposable installed bridge verification\n");
+    await writeFile(join(repoPath, "README.md"), "Threadhop disposable installed bridge verification\n");
     await checked("git", ["add", "."]); await checked("git", ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"]);
     const repo = (await findRepo(repoPath))!;
     let sourceId: string | undefined;
@@ -84,9 +84,9 @@ export async function verifyInstalledBridge(options: WorkerOptions) {
     } else {
       const sessionId = randomUUID(), id = `${options.source}:${sessionId}`;
       await appendEvents(repo, [
-        { kind: "conversation_turn", occurred_at: "2026-01-01T00:00:00.000Z", actor: { type: "human" }, producer: { tool: "turnbridge-fixture", source: options.source, session_id: sessionId }, stream: { id, seq: 0 },
+        { kind: "conversation_turn", occurred_at: "2026-01-01T00:00:00.000Z", actor: { type: "human" }, producer: { tool: "threadhop-fixture", source: options.source, session_id: sessionId }, stream: { id, seq: 0 },
           content: { role: "user", blocks: [{ type: "text", text: `${historyMarker}\nUnicode café 日本語 🦉\n- item one\n- item two\n\n\`\`\`js\nconsole.log('history');\n\`\`\`` }] } },
-        { kind: "conversation_turn", occurred_at: "2026-01-01T00:00:01.000Z", actor: { type: "agent" }, producer: { tool: "turnbridge-fixture", source: options.source, session_id: sessionId }, stream: { id, seq: 1 },
+        { kind: "conversation_turn", occurred_at: "2026-01-01T00:00:01.000Z", actor: { type: "agent" }, producer: { tool: "threadhop-fixture", source: options.source, session_id: sessionId }, stream: { id, seq: 1 },
           content: { role: "assistant", blocks: [{ type: "thinking", text: "Recorded visible thought." }, { type: "text", text: assistantMarker }] } },
       ]);
     }
@@ -98,7 +98,7 @@ export async function verifyInstalledBridge(options: WorkerOptions) {
     const flags = await configureScriptedTarget(name, root, repoPath, provider.endpoint);
     const target = targets[name];
     let version: string;
-    try { version = name === "aider" && process.env.TURNBRIDGE_AIDER_PYTHON ? await checked(process.env.TURNBRIDGE_AIDER_PYTHON, ["-m", "aider", "--version"]) : await checked(target.binary, ["--version"]); }
+    try { version = name === "aider" && process.env.THREADHOP_AIDER_PYTHON ? await checked(process.env.THREADHOP_AIDER_PYTHON, ["-m", "aider", "--version"]) : await checked(target.binary, ["--version"]); }
     catch (error) { report.reason = `cli-unavailable: ${String(error)}`; return report; }
     report.targetVersion = version.match(/\d+\.\d+\.\d+/)?.[0] ?? version.trim();
     if (name === "cline") await checked(target.binary, ["auth", "openai-compatible", "--apikey", "TESTONLY-local", "--modelid", "fixture", "--baseurl", provider.endpoint + "/v1"]);

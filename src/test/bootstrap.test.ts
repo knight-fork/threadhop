@@ -13,21 +13,21 @@ import { cleanupRepo, makeTempRepo, seedConversation } from "./helpers.js";
 
 const SID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
-async function withTurnbridgeHome<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), "turnbridge-bootstrap-test-"));
-  const prev = process.env["TURNBRIDGE_HOME"];
-  process.env["TURNBRIDGE_HOME"] = dir;
+async function withThreadhopHome<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), "threadhop-bootstrap-test-"));
+  const prev = process.env["THREADHOP_HOME"];
+  process.env["THREADHOP_HOME"] = dir;
   try {
     return await fn(dir);
   } finally {
-    if (prev === undefined) delete process.env["TURNBRIDGE_HOME"];
-    else process.env["TURNBRIDGE_HOME"] = prev;
+    if (prev === undefined) delete process.env["THREADHOP_HOME"];
+    else process.env["THREADHOP_HOME"] = prev;
     await rm(dir, { recursive: true, force: true });
   }
 }
 
 test("writes the transcript under <configDir>/bootstrap, sanitizing the conversation id", async () => {
-  await withTurnbridgeHome(async (home) => {
+  await withThreadhopHome(async (home) => {
     const repo = await makeTempRepo();
     try {
       await seedConversation(repo, `codex:${SID}`, "codex", [
@@ -57,7 +57,7 @@ test("writes the transcript under <configDir>/bootstrap, sanitizing the conversa
 });
 
 test("each bootstrap gets an immutable isolated transcript instead of overwriting another session's context", async () => {
-  await withTurnbridgeHome(async () => {
+  await withThreadhopHome(async () => {
     const repo = await makeTempRepo();
     try {
       await seedConversation(repo, `codex:${SID}`, "codex", [
@@ -78,7 +78,7 @@ test("each bootstrap gets an immutable isolated transcript instead of overwritin
 });
 
 test("reported size grows with a larger transcript", async () => {
-  await withTurnbridgeHome(async () => {
+  await withThreadhopHome(async () => {
     const repo = await makeTempRepo();
     try {
       await seedConversation(repo, `codex:${SID}`, "codex", [
@@ -104,7 +104,7 @@ test("reported size grows with a larger transcript", async () => {
 
 
 test("environmental native import failures retain their cause through a disclosed bootstrap fallback", async () => {
-  await withTurnbridgeHome(async () => {
+  await withThreadhopHome(async () => {
     const repo = await makeTempRepo();
     try {
       await seedConversation(repo, `codex:${SID}`, "codex", [{ role: "user", text: "keep this visible history", seq: 0 }]);

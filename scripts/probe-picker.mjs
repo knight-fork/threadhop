@@ -40,7 +40,7 @@ async function runInPty({ command, args, cwd, logPath, settleSeconds }) {
   return stripAnsi(await readFile(logPath, "utf8").catch(() => ""));
 }
 
-const artifacts = await mkdtemp(join(tmpdir(), "turnbridge-picker-"));
+const artifacts = await mkdtemp(join(tmpdir(), "threadhop-picker-"));
 const which = process.argv[2] ?? "all";
 const cleanup = [];
 
@@ -50,7 +50,7 @@ async function probeClaudeTitles() {
   const FIRST_MSG_TITLED = `ZFIRSTMSGTITLED${RUN}`;
   const FIRST_MSG_PLAIN = `ZFIRSTMSGPLAIN${RUN}`;
 
-  const cwd = await realpath(await mkdtemp(join(tmpdir(), "turnbridge-picker-claude-")));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), "threadhop-picker-claude-")));
   const projectDir = join(
     process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"),
     "projects",
@@ -135,10 +135,10 @@ async function probeClaudeTitles() {
 
 // ----------------------------------------------------------------- codex (G8)
 async function probeCodexCwdFilter() {
-  const cwd = await realpath(await mkdtemp(join(tmpdir(), "turnbridge-picker-codex-")));
+  const cwd = await realpath(await mkdtemp(join(tmpdir(), "threadhop-picker-codex-")));
   const sub = join(cwd, "nested");
   await mkdir(sub, { recursive: true });
-  const elsewhere = await realpath(await mkdtemp(join(tmpdir(), "turnbridge-picker-other-")));
+  const elsewhere = await realpath(await mkdtemp(join(tmpdir(), "threadhop-picker-other-")));
   cleanup.push(cwd, elsewhere);
 
   const sessionsRoot = join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "sessions");

@@ -6,14 +6,14 @@ import { shimInstall, shimStatus, shimUninstall } from "./shim.js";
 import { parseCliName } from "./types.js";
 import { targetCapabilities } from "./capabilities.js";
 
-const USAGE = `turnbridge — continue a coding-agent conversation in another CLI
+const USAGE = `threadhop — continue a coding-agent conversation in another CLI
 
 Usage:
-  turnbridge resume [target-cli] [options]             pick a conversation and resume it
-  turnbridge list [options]                            print compatible conversations
-  turnbridge targets [--json]                          show implemented target routes
-  turnbridge shim install|uninstall|status             opt-in \`claude --resume\` interception
-  turnbridge records <command>                         maintain shared cledger records
+  threadhop resume [target-cli] [options]             pick a conversation and resume it
+  threadhop list [options]                            print compatible conversations
+  threadhop targets [--json]                          show implemented target routes
+  threadhop shim install|uninstall|status             opt-in \`claude --resume\` interception
+  threadhop records <command>                         maintain shared cledger records
 
 Options for resume/list:
   --all         include collaborators' conversations (default: yours + unattributed)
@@ -38,12 +38,12 @@ const RECORD_ALIASES = new Map([
 async function recordsCommand(argv: string[]): Promise<number> {
   // cledger alone owns the pre-push hook ABI for this shared namespace.
   if (argv[0] === "transport-push") {
-    process.stderr.write("turnbridge records: use cledger transport-push for the shared hook\n");
+    process.stderr.write("threadhop records: use cledger transport-push for the shared hook\n");
     return 2;
   }
   const repo = await findRepo(process.cwd());
   if (!repo) {
-    process.stderr.write("turnbridge records: run inside a git repository\n");
+    process.stderr.write("threadhop records: run inside a git repository\n");
     return 1;
   }
   return runRecordsCommand({
@@ -53,7 +53,7 @@ async function recordsCommand(argv: string[]): Promise<number> {
     stdout: process.stdout,
     stderr: process.stderr,
     env: process.env,
-    commandName: "turnbridge records",
+    commandName: "threadhop records",
   });
 }
 
@@ -68,7 +68,7 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "records") return recordsCommand(args);
   if (command === "targets") {
-    if (args.some(arg => arg !== "--json")) { process.stderr.write("turnbridge: targets accepts only --json\n"); return 1; }
+    if (args.some(arg => arg !== "--json")) { process.stderr.write("threadhop: targets accepts only --json\n"); return 1; }
     const capabilities = targetCapabilities();
     process.stdout.write(args.includes("--json") ? JSON.stringify(capabilities, null, 2) + "\n" :
       "CLI                  Native import  Exact resume  Bootstrap\n" + capabilities.map(cli =>
@@ -89,12 +89,12 @@ async function main(argv: string[]): Promise<number> {
       else if (!arg.startsWith("-")) {
         const target = parseCliName(arg);
         if (!target) {
-          process.stderr.write(`turnbridge: unknown target CLI: ${arg}\n`);
+          process.stderr.write(`threadhop: unknown target CLI: ${arg}\n`);
           return 1;
         }
         flags.target = target;
       } else {
-        process.stderr.write(`turnbridge: unknown option: ${arg}\n`);
+        process.stderr.write(`threadhop: unknown option: ${arg}\n`);
         return 1;
       }
     }
@@ -106,18 +106,18 @@ async function main(argv: string[]): Promise<number> {
     if (sub === "install") return shimInstall();
     if (sub === "uninstall") return shimUninstall();
     if (sub === "status") return shimStatus();
-    process.stderr.write("turnbridge: shim install|uninstall|status\n");
+    process.stderr.write("threadhop: shim install|uninstall|status\n");
     return 1;
   }
 
-  process.stderr.write(`turnbridge: unknown command: ${command}\n\n${USAGE}`);
+  process.stderr.write(`threadhop: unknown command: ${command}\n\n${USAGE}`);
   return 1;
 }
 
 main(process.argv.slice(2)).then(
   (code) => { process.exitCode = code; },
   (err) => {
-    process.stderr.write(`turnbridge: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`threadhop: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exitCode = 1;
   },
 );

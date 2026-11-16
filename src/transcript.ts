@@ -63,7 +63,7 @@ export function renderTranscript(summary: ConversationSummary): string {
 /**
  * Size of a rendered transcript, for pre-launch reporting.
  *
- * Deliberately not a token count. Turnbridge never tokenizes anything — it
+ * Deliberately not a token count. Threadhop never tokenizes anything — it
  * moves raw text — and a token figure would be doubly misleading here: token
  * counts are not transferable across models with different tokenizers, and the
  * whole point of a bridge is that the target model is not the source model.

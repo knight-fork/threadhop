@@ -1,6 +1,6 @@
 # Claude Code Native Session File Format (reverse-engineered)
 
-Goal: let `turnbridge` fabricate a `.jsonl` file that `claude --resume <session-id>`
+Goal: let `threadhop` fabricate a `.jsonl` file that `claude --resume <session-id>`
 will natively load, with full prior conversation context visible to the model.
 
 **Pinned version tested against: `2.1.215` (Claude Code)**, installed at
@@ -43,7 +43,7 @@ Verified example:
   survives unchanged, confirming char-by-char non-alnum replacement rather
   than some smarter path-segment join).
 
-Implementation to use in turnbridge (Python-ish):
+Implementation to use in threadhop (Python-ish):
 ```python
 def encode_project_dir(cwd_abs_path: str) -> str:
     return "".join(c if c.isalnum() else "-" for c in cwd_abs_path)
@@ -124,7 +124,7 @@ exact cwd: `claude --resume <uuid> -p "..." --max-turns 1`.
 
 ### Recommended (defensive) fields to actually emit
 
-Even though the above is the *true minimum*, turnbridge should emit richer
+Even though the above is the *true minimum*, threadhop should emit richer
 lines close to what real Claude Code produces, for two reasons: (a) the casr
 project found that on the version(s) *it* targeted, omitting the full
 assistant envelope caused `claude --resume` to hang / report "Failed to
@@ -160,7 +160,7 @@ file lives in.** Verified directly:
   non-matching cwd) → **fails immediately**: `No conversation found with
   session ID: <uuid>`.
 
-**Implication for turnbridge**: it must invoke `claude --resume <id>` with
+**Implication for threadhop**: it must invoke `claude --resume <id>` with
 the process cwd set to the exact original/intended project path (or fabricate
 the session under whatever cwd it plans to actually launch `claude` from) —
 there is no global session ID lookup across projects. The `--resume` flag
@@ -246,7 +246,7 @@ fields are required for resume (§2) — they are cosmetic/telemetry.
 `thinking` content blocks (extended thinking) were also observed, shape
 `{"type":"thinking","thinking":"...","signature":"<long base64 blob>"}` —
 not tested for resume necessity, presumed cosmetic/droppable like other
-content blocks, but the `signature` is opaque and turnbridge cannot forge a
+content blocks, but the `signature` is opaque and threadhop cannot forge a
 valid one; **do not fabricate `thinking` blocks** — omit them (plain `text`
 and `tool_use`/`tool_result` blocks are sufficient and were directly
 verified to work).
@@ -271,7 +271,7 @@ round-tripped correctly — the resumed session correctly quoted back a fact
 ("MANATEE2") that only existed inside the fake tool's `tool_result` content.
 Claude Code does not validate `tool_use.name` against its own tool registry
 when replaying history — historical tool calls are context only, never
-re-executed. This means turnbridge can represent an entire foreign CLI's
+re-executed. This means threadhop can represent an entire foreign CLI's
 tool-call history (e.g. Codex's `shell`, Cursor's `edit_file`, whatever) by
 just choosing readable `name` strings; no schema translation is required for
 resume purposes. (This matches casr's own documented approach — see
@@ -318,7 +318,7 @@ produced this report* (i.e. this very subagent run):
      structure is necessary for `--resume` to work — **top-level resume
      works fine without any `subagents/` directory present** (all our
      successful fabrication tests had no such directory). Only fabricate it
-     if turnbridge specifically needs subagent turns to show up distinctly
+     if threadhop specifically needs subagent turns to show up distinctly
      in the transcript UI; otherwise flatten subagent output into the main
      file as ordinary `isSidechain:false` turns (untested but low-risk,
      since `isSidechain` itself was shown to be non-required, §2).
@@ -360,7 +360,7 @@ verified empirical result exactly — no divergence there.
   It's possible interactive mode does additional validation (e.g. the casr
   "hangs on load" behavior) that print mode skips. Recommend a manual
   interactive smoke test (`claude --resume <id>` with no `-p`) before
-  shipping turnbridge broadly.
+  shipping threadhop broadly.
 - **Resume picker title source — RESOLVED, inference was correct** (probe,
   2026-07-27, claude 2.1.220, `scripts/probe-picker.mjs`, driven through a
   pty). Two sessions were planted in one project dir: one with an `ai-title`
@@ -368,8 +368,8 @@ verified empirical result exactly — no divergence there.
   picker rendered the `ai-title` for the first (and *not* its first user
   message) and the first user message for the second. So `ai-title` wins, with
   fallback to the first user message exactly as §3 guessed.
-  **Consequence for turnbridge:** fabricated sessions carried no `ai-title`,
-  so every bridged conversation appeared in the picker titled by turnbridge's
+  **Consequence for threadhop:** fabricated sessions carried no `ai-title`,
+  so every bridged conversation appeared in the picker titled by threadhop's
   own import notice — the same string for every bridge, describing the
   machinery instead of the conversation. `buildSessionLines` now emits an
   `ai-title` derived from the first human turn. Trailing placement was
@@ -381,7 +381,7 @@ verified empirical result exactly — no divergence there.
   are tolerated: a file whose first line is stamped *newer* than every line
   below it resumed with full history intact, as did a backdated-monotonic
   variant of the same file. Ordering is not load-bearing for resume, so
-  turnbridge keeps its import notice at fabrication time (see
+  threadhop keeps its import notice at fabrication time (see
   `buildSessionLines`) rather than backdating it.
   **Still unresolved:** whether the resume picker orders sessions by file
   mtime or by line timestamps. This only matters cosmetically (where a freshly
@@ -390,7 +390,7 @@ verified empirical result exactly — no divergence there.
   RFC3339 `...Z` strings have been tried and confirmed required-present;
   second-precision and offset-instead-of-`Z` forms remain unverified.
   conversation-ledger validates `occurred_at` with `Date.parse` alone, so
-  those forms *can* reach a fabricator; turnbridge therefore normalizes every
+  those forms *can* reach a fabricator; threadhop therefore normalizes every
   timestamp it writes to millisecond UTC (`src/timestamps.ts`) rather than
   relying on tolerance it has not measured.
 - **Large/long sessions — verified clean to 300 turns / ~215 KB** (probe,
@@ -399,7 +399,7 @@ verified empirical result exactly — no divergence there.
   last turns recalled, so early history is not silently dropped when a long
   history arrives all at once at session start rather than accumulating turn by
   turn. No line-count or byte-size cliff was found below that ceiling.
-  **Beyond ~300 turns is deliberately unmeasured**: turnbridge passes history
+  **Beyond ~300 turns is deliberately unmeasured**: threadhop passes history
   through without truncating, and fitting it is Claude Code's own job (it
   auto-compacts). The useful claim is a verified-clean range, not the exact
   cliff. Raise the ceiling with `PROBE_TURNS=N` if that assumption needs
@@ -422,7 +422,7 @@ verified empirical result exactly — no divergence there.
   notice. Consistent with §2's backward `parentUuid` walk. Generate a fresh
   UUIDv4 per line, always; `src/test/fabricate-invariants.test.ts` asserts it.
 - **`--resume` cwd-scoping workaround**: since resume is strictly scoped to
-  the launch cwd's encoded project directory (§3), turnbridge must always
+  the launch cwd's encoded project directory (§3), threadhop must always
   `cd` (or set subprocess cwd) to match before invoking `claude --resume`.
   There is no `--project-dir`-style override flag observed in `claude
   --help` output for `--resume` specifically to bypass this.

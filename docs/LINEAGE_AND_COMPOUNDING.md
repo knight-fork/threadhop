@@ -5,7 +5,7 @@
 [POLICY_SPLIT.md](POLICY_SPLIT.md), which asked whether the fabrication tier
 model covers capture as well as write. This is that question followed all the
 way down: it turns out to be a three-repo architecture question spanning
-conversation-ledger, turnbridge, and context-graph.
+conversation-ledger, threadhop, and context-graph.
 
 Most of this is still undecided. The exception is §4's extension-ownership
 question, which is settled in annals' README: annals owns storage, while the
@@ -22,7 +22,7 @@ polymorphic by actor type:
 |---|---|---|---|
 | a human prompt | `human` | git author email | **the person at the keyboard** |
 | an agent reply | `agent` | model id | the LLM |
-| a turnbridge continuation | `system` | `"turnbridge"` | the tool |
+| a threadhop continuation | `system` | `"threadhop"` | the tool |
 
 The **coding CLI is none of these** — it is `producer.source`
 (`"claude-code"`, `"codex"`, `"opencode"`).
@@ -67,12 +67,12 @@ conversation, and no adapter reads either.
 While confirming the above: cledger has shipped **`producer.model`,
 `producer.provider`, and `producer.source_version` since 0.12.0**
 (`src/schema.ts:110-126`), explicitly for per-turn agent provenance, recorded
-only when the source states it and never inferred. **Turnbridge reads none of
+only when the source states it and never inferred. **Threadhop reads none of
 them.** Every model-id decision in the codebase reads `actor.id`
 (`claude-code.ts:195`, `opencode.ts:193`), which is the older, polymorphic,
 convention-based field.
 
-Two consequences, both cheap to fix and both entirely inside turnbridge:
+Two consequences, both cheap to fix and both entirely inside threadhop:
 
 - `producer.model` is the field that actually means "the model that served
   this turn." `actor.id` means that only by convention, and only on agent
@@ -115,14 +115,14 @@ close it.
 
 Here is the mechanism, and it is worse than forgetting the ancestor:
 
-1. turnbridge fabricates `claude → codex`. Per the tier model, that render
+1. threadhop fabricates `claude → codex`. Per the tier model, that render
    degrades: thinking folds to `[visible thinking]` text, unpaired tool
    results fold to prose, the model id is dropped, and a
-   `[turnbridge import notice]` user turn is prepended.
+   `[threadhop import notice]` user turn is prepended.
 2. The user continues in Codex. cledger captures that Codex session as a new
    conversation — **faithfully**, because cledger's job is to record what the
-   source contains, and it has no way to know turnbridge authored it.
-3. turnbridge's degraded output is now canonical evidence, indistinguishable
+   source contains, and it has no way to know threadhop authored it.
+3. threadhop's degraded output is now canonical evidence, indistinguishable
    from anything a human and model actually produced.
 4. Bridging onward `codex → opencode` reads that conversation and degrades it
    *again* — folding already-folded text, prepending a second import notice.
@@ -138,7 +138,7 @@ but flagged" — but flagging is not handling.
 ### This exact bug class has already bitten this ecosystem once
 
 cledger's design doc (`WIP_TECHNICAL_DESIGN.md`, secret-scan reports, 0.16.0)
-records this, and records it as **observed while dogfooding turnbridge**:
+records this, and records it as **observed while dogfooding threadhop**:
 
 > the *context* around a match is what tripped the rule in the first place …
 > so a report captured into a later conversation re-seeded a finding on the
@@ -151,14 +151,14 @@ cycle amplified it. The fix chosen there is the fix that generalizes —
 **"Reports carry coordinates, never content."** Reference the original instead
 of reproducing it, and the loop cannot compound.
 
-## 3. Why turnbridge cannot simply adopt that fix — and what it can do instead
+## 3. Why threadhop cannot simply adopt that fix — and what it can do instead
 
 context-graph's design already states the referencing principle for this exact
 edge (`WIP_TECHNICAL_DESIGN.md`, `continuation` edge kind): "the copied prefix
 is reachable through the pointer, not re-materialized." That is correct for
-context-graph and impossible for turnbridge, and the asymmetry is the crux:
+context-graph and impossible for threadhop, and the asymmetry is the crux:
 
-**context-graph may reference; turnbridge must copy.** Fabrication *is*
+**context-graph may reference; threadhop must copy.** Fabrication *is*
 re-materialization — a native session file the target CLI reads directly. The
 target cannot follow a pointer into git notes. So the copy will always exist,
 and cledger will always capture it. "Don't re-materialize" is not available.
@@ -173,7 +173,7 @@ copy — `imported_through_seq` says exactly which prefix that is — render fro
 the **ancestor's original event**, not from `C`'s re-captured degraded
 version. Only turns `C` genuinely originated get rendered from `C`.
 
-This is entirely a turnbridge-side change, needs no schema work, and fixes
+This is entirely a threadhop-side change, needs no schema work, and fixes
 four things at once:
 
 - No compounding. Each hop degrades the *original* once, never a degradation.
@@ -189,7 +189,7 @@ four things at once:
 
 One refinement worth building in the same pass: `imported_through_seq` is seq
 arithmetic, which is cheap but coarse — it identifies a *range*, and assumes
-positional correspondence survived the render. turnbridge knows more than that
+positional correspondence survived the render. threadhop knows more than that
 at fabricate time: it knows the exact ordered list of source event ids it
 rendered. Recording that list in the `continuation` event's content makes the
 mapping precise (target position *i* ⟵ source event `ev2-…`) at essentially no
@@ -235,8 +235,8 @@ the human experienced. Reconstructing "the conversation as recorded" and
 "the conversation as it would have been without transport damage" are
 different artifacts, and *most faithful* is ambiguous between them.
 
-Decision: **as-it-would-have-been.** PRODUCT_INTENT says turnbridge moves the
-literal record of the work; the fold markers are transport artifacts turnbridge
+Decision: **as-it-would-have-been.** PRODUCT_INTENT says threadhop moves the
+literal record of the work; the fold markers are transport artifacts threadhop
 itself introduced, never content anyone authored. Restoring them is undoing our
 own damage, not inventing history. But it should be a stated decision, because
 the other reading is defensible and the difference is invisible once shipped.
@@ -257,7 +257,7 @@ it is an acceptable last resort.
 **(iii) Ancestral import notices.** Each hop's notice is a real captured user
 turn — the human did see it. When re-rendering, drop the ancestors' notices
 and emit one that names the whole chain. Safe, because the notice is the one
-piece of content turnbridge can identify with certainty as its own; and
+piece of content threadhop can identify with certainty as its own; and
 necessary, because a stale notice actively misinforms — it names the wrong
 source CLI for the history that follows.
 
@@ -265,7 +265,7 @@ source CLI for the history that follows.
 
 Separating what the fix needs from what the ecosystem needs:
 
-**Not needed for the fix above.** Everything in §3 is turnbridge-side. Worth
+**Not needed for the fix above.** Everything in §3 is threadhop-side. Worth
 saying plainly, because "this is a cledger design question" is the kind of
 conclusion that defers a fix behind a dependency that isn't real.
 
@@ -279,29 +279,29 @@ cledger today has three relational notions and none of them is this one:
 - `re_anchor` events — commit→commit remapping.
 
 A bridge is conversation→conversation but is **not** a sub-conversation: it is
-a successor/fork, not a child. With no first-class slot for it, turnbridge
+a successor/fork, not a child. With no first-class slot for it, threadhop
 improvised — a custom `continuation` kind, attached to the target conversation
 at `seq: 0`, with the real payload in uninterpreted `content`. That is a
 sanctioned extension (`schema.ts:7-9` explicitly invites downstream tools to
 add kinds without a schema release), so it was the right call at the time.
 
 What changed is that context-graph now reads it — its `continuation` edge kind
-parses turnbridge's `rel:"continues"` and its `imported_through_seq`. The
+parses threadhop's `rel:"continues"` and its `imported_through_seq`. The
 moment a second tool depends on that payload, a private convention has become
 a **de-facto public interface with no owner and no versioning**. intent-recall
 is likely the third.
 
 An earlier draft of this note proposed fixing that by promoting `continues`
 into cledger's own vocabulary. That is the wrong shape: it would make cledger
-aware of turnbridge, inverting the dependency for no gain — cledger would be
+aware of threadhop, inverting the dependency for no gain — cledger would be
 documenting a relation it has no use for and cannot validate the meaning of.
 The problem was never that cledger lacks the concept. It is that **consumers
 are hardcoding a producer's payload shape**, and there are two ways to fix
 that without cledger learning anything about bridging:
 
-- **The producer publishes its reader.** turnbridge already exports
+- **The producer publishes its reader.** threadhop already exports
   `readLineage` and `ContinuationRecord` (`src/lineage.ts:6-23`). context-graph
-  depends on turnbridge-the-library for that one edge kind rather than parsing
+  depends on threadhop-the-library for that one edge kind rather than parsing
   `content` by hand. Whoever emits a vocabulary owns its reader — the same
   rule that already governs cledger's capture adapters.
 - **cledger offers generic extension facilities**, which is the more
@@ -309,12 +309,12 @@ that without cledger learning anything about bridging:
   `content` is uninterpreted" — real, but ungoverned.
 
 Note that cledger already *has* the input half of this: `appendEvents` is a
-public library entry point and turnbridge already uses it correctly. Its
+public library entry point and threadhop already uses it correctly. Its
 history says how deliberate that is — `appendEvents` has been module-exported
 since v0.1.0, but the package had no entry point at all until `c08f650`
 ("Add library entry point and human-turn identity stamping", 2026-07-19)
-created one *for turnbridge*, and `src/index.ts` still describes itself as the
-"Public library surface for programmatic clients (e.g. turnbridge)". It is a
+created one *for threadhop*, and `src/index.ts` still describes itself as the
+"Public library surface for programmatic clients (e.g. threadhop)". It is a
 retrofitted front door, not a designed external-input API — though the append
 path behind it is sound, enforcing validation, capture-tier redaction,
 id-dedup, and per-repo locking on everything a third party writes.
@@ -323,27 +323,27 @@ id-dedup, and per-repo locking on everything a third party writes.
 supersedes what this note previously proposed: a
 third-party kind is identified by the pair **`(producer.tool, kind)`**, never
 by `kind` alone. An earlier draft here proposed namespacing the kind string
-(`turnbridge/continuation`); that was redundant string-packing, since cledger
+(`threadhop/continuation`); that was redundant string-packing, since cledger
 already carries the producer as structured data on every event and
 `producer.version` states which revision of the vocabulary an event was
 written against. Annals deliberately has no registration or discovery
 mechanism: whoever emits a vocabulary publishes its reader. For
-`continuation`, that reader is turnbridge's `readLineage`; consumers import it
+`continuation`, that reader is threadhop's `readLineage`; consumers import it
 rather than parsing `content` themselves.
 
 **Worth considering, with a real cost: event-level derivation.** A captured
 turn that is a lossy copy of an earlier event has no way to say so. If it did
 (`rel: "derived_from"`, or a fidelity marker), any consumer could resolve a
-copy to its original without knowing turnbridge's seq conventions. It fits
+copy to its original without knowing threadhop's seq conventions. It fits
 cledger's grain — `supersession` (replaced by better) and `unrecognized` (raw
 kept for a smarter version later) are the same instinct.
 
 The cost is where it gets awkward: cledger captures the target CLI's session
 file independently and cannot tell a fabricated session from a native one, so
-it cannot stamp the derivation itself. Either turnbridge pre-registers the
+it cannot stamp the derivation itself. Either threadhop pre-registers the
 mapping (which is §3's event-id list, already proposed and cheaper), or
-capture learns to recognize turnbridge's output — which means cledger knowing
-about turnbridge, inverting the dependency. **Recommendation: do the
+capture learns to recognize threadhop's output — which means cledger knowing
+about threadhop, inverting the dependency. **Recommendation: do the
 event-id list in the `continuation` payload first.** It buys most of the
 value; revisit event-level derivation only if a consumer needs it that
 cledger cannot serve through the lineage edge.
@@ -354,8 +354,8 @@ The instinct that these were meant to be separate projects and keep drifting
 together is worth taking seriously — but the evidence says the division is
 sound and only the *seam* is drawn in the wrong place.
 
-The current seam is **by phase**: cledger owns capture, turnbridge owns
-resume. That breaks here for a structural reason: turnbridge's output becomes
+The current seam is **by phase**: cledger owns capture, threadhop owns
+resume. That breaks here for a structural reason: threadhop's output becomes
 cledger's input, so the pipeline is a **cycle, not a line**, and a phase-based
 split has no way to say who owns a fact that arises from going around the
 loop.
@@ -365,9 +365,9 @@ A seam that survives a cycle is **by ownership of the record**:
 - **cledger** owns *facts about records*, including how records relate to each
   other. A conversation-level edge is a fact about records, not a fact about
   resuming.
-- **turnbridge** owns *rendering a record into a target CLI*, and — like any
+- **threadhop** owns *rendering a record into a target CLI*, and — like any
   adapter — produces facts that cledger stores. Writing a `continuation` event
-  is turnbridge acting as a producer, which is exactly the role cledger's
+  is threadhop acting as a producer, which is exactly the role cledger's
   extension point anticipates.
 - **context-graph** owns *derived structure* over those facts, and is
   explicitly forbidden from being a second store ("Nodes reference artifacts;
@@ -377,15 +377,15 @@ That last point settles a layering question worth being explicit about:
 **context-graph cannot be where lineage lives.** It commits to being a derived,
 rebuildable view — same inputs, same graph. But "this conversation was
 fabricated from that one" is *not derivable* from any artifact. Only
-turnbridge knows it, only at the instant it bridges. It has to be **recorded**
-by turnbridge into cledger, and then *read* by context-graph. Which is
+threadhop knows it, only at the instant it bridges. It has to be **recorded**
+by threadhop into cledger, and then *read* by context-graph. Which is
 precisely what happens today.
 
 So the architecture is already right. The three problems are narrower than the
 architecture:
 
-1. turnbridge doesn't consume its own lineage transitively (§2, one-hop only).
-2. turnbridge copies from the copy rather than the original (§3).
+1. threadhop doesn't consume its own lineage transitively (§2, one-hop only).
+2. threadhop copies from the copy rather than the original (§3).
 3. `continuation` is a private convention that two other tools now depend on
    (§4).
 

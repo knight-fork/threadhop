@@ -4,7 +4,7 @@
 //
 // The question worth answering is NOT "where is the byte cliff". Both CLIs
 // already own context management — Claude Code auto-compacts, Codex has a
-// `compacted` rollout item — and turnbridge deliberately passes history
+// `compacted` rollout item — and threadhop deliberately passes history
 // through without truncating it. The question is whether that machinery
 // engages gracefully on a history that arrives all at once at session start,
 // rather than growing turn by turn the way it normally would.
@@ -42,10 +42,10 @@ const FILLER =
 const names = process.argv.slice(2).filter((a) => !a.startsWith("-"));
 const targetNames = names.length ? names : ["claude-code", "codex"];
 
-const dir = await realpath(await mkdtemp(join(tmpdir(), "turnbridge-large-")));
+const dir = await realpath(await mkdtemp(join(tmpdir(), "threadhop-large-")));
 await git(["init", "-q", "-b", "main"], { cwd: dir });
-await git(["config", "user.email", "probe@turnbridge.test"], { cwd: dir });
-await git(["config", "user.name", "Turnbridge Probe"], { cwd: dir });
+await git(["config", "user.email", "probe@threadhop.test"], { cwd: dir });
+await git(["config", "user.name", "Threadhop Probe"], { cwd: dir });
 await git(["config", "commit.gpgsign", "false"], { cwd: dir });
 await writeFile(join(dir, "README.md"), "probe\n");
 await git(["add", "."], { cwd: dir });
@@ -84,16 +84,16 @@ for (const targetName of targetNames) {
       kind: "conversation_turn",
       occurred_at: stamp(seq),
       actor: isUser
-        ? { type: "human", id: "probe@turnbridge.test" }
+        ? { type: "human", id: "probe@threadhop.test" }
         : { type: "agent", id: "probe-model" },
-      producer: { tool: "turnbridge-probe", source, session_id: sessionId },
+      producer: { tool: "threadhop-probe", source, session_id: sessionId },
       conversation: { id: cid, seq },
       content: { role: isUser ? "user" : "assistant", blocks: [{ type: "text", text }] },
     });
   }
   // The last turn must be a user turn so the marker is something "I gave you".
   if (drafts[TURNS - 1].actor.type !== "human") {
-    drafts[TURNS - 1].actor = { type: "human", id: "probe@turnbridge.test" };
+    drafts[TURNS - 1].actor = { type: "human", id: "probe@threadhop.test" };
     drafts[TURNS - 1].content.role = "user";
   }
   await appendEvents(repo, drafts);

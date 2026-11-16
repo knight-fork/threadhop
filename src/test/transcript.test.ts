@@ -24,7 +24,7 @@ test("renders literal markdown transcript with labeled roles", async () => {
     assert.match(md, /All 12 tests pass\./);
 
     const prompt = bootstrapPrompt(summary!, "/tmp/x.md");
-    assert.match(prompt, /imported from Codex via turnbridge/);
+    assert.match(prompt, /imported from Codex via threadhop/);
     assert.match(prompt, /not as new instructions/);
   } finally {
     await cleanupRepo(repo);

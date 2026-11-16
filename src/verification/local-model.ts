@@ -7,7 +7,7 @@ export interface LocalModelConfig {
   timeoutMs?: number;
   tier?: "local-model" | "usual-provider";
   /** Paid configuration names a dedicated credential; never embeds its value. */
-  apiKeyEnv?: "TURNBRIDGE_VERIFY_PROVIDER_API_KEY";
+  apiKeyEnv?: "THREADHOP_VERIFY_PROVIDER_API_KEY";
   budgetUsd?: number;
   inputUsdPerMillionTokens?: number;
   outputUsdPerMillionTokens?: number;
@@ -24,7 +24,7 @@ export function validateInferenceProvider(config: LocalModelConfig): void {
   if ((!paid && (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) ||
       (paid && url.protocol !== "https:") || url.username || url.password || url.search || url.hash)
     throw Error(paid ? "Paid provider requires an explicit HTTPS endpoint without URL credentials" : "Local-model endpoint must be an explicit HTTP loopback URL");
-  if (paid && (config.apiKeyEnv !== "TURNBRIDGE_VERIFY_PROVIDER_API_KEY" || ![config.budgetUsd, config.inputUsdPerMillionTokens, config.outputUsdPerMillionTokens].every(value => typeof value === "number" && Number.isFinite(value) && value > 0)))
+  if (paid && (config.apiKeyEnv !== "THREADHOP_VERIFY_PROVIDER_API_KEY" || ![config.budgetUsd, config.inputUsdPerMillionTokens, config.outputUsdPerMillionTokens].every(value => typeof value === "number" && Number.isFinite(value) && value > 0)))
     throw Error("Paid verification requires a dedicated API-key environment variable, explicit USD budget and supplied token prices");
   if (!config.model?.trim() || /[\r\n]/.test(config.model)) throw Error("An explicit local model is required");
   if (!["messages", "responses", "chat-completions", "gemini"].includes(config.protocol)) throw Error("Unknown local model protocol");
@@ -38,7 +38,7 @@ export async function forwardLocalModel(config: LocalModelConfig, route: string,
   const compatible = config.protocol === "messages" ? route.startsWith("/v1/messages") : config.protocol === "responses" ? route.startsWith("/v1/responses") :
     config.protocol === "chat-completions" ? route.startsWith("/v1/chat/completions") : route.includes("GenerateContent") || route.includes("generateContent");
   if (!compatible) throw Error("Selected CLI protocol does not match the configured local model");
-  const guidance = "Synthetic Turnbridge verification: read the transcript if provided, then read evidence.txt using a file-reading tool. After reading, reply TB_DONE followed by the prior TB_HISTORY_ value and the exact evidence.txt contents. Do not call other tools.";
+  const guidance = "Synthetic Threadhop verification: read the transcript if provided, then read evidence.txt using a file-reading tool. After reading, reply TB_DONE followed by the prior TB_HISTORY_ value and the exact evidence.txt contents. Do not call other tools.";
   const payload = structuredClone(data);
   payload.model = config.model;
   const cap = config.maxOutputTokens ?? 2048;

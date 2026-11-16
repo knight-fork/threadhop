@@ -8,7 +8,7 @@ import type { LaunchPlan } from "../targets/types.js";
 
 /** A throwaway executable shell script, never a real claude/codex binary. */
 async function withFakeBin<T>(script: string, fn: (path: string, dir: string) => Promise<T> | T): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), "turnbridge-launch-test-"));
+  const dir = await mkdtemp(join(tmpdir(), "threadhop-launch-test-"));
   const path = join(dir, "fake-cli");
   await writeFile(path, script);
   await chmod(path, 0o755);
@@ -42,7 +42,7 @@ async function captureWrites<T>(
 
 test("binaryOnPath finds a real executable and rejects a nonexistent one", async () => {
   assert.equal(await binaryOnPath("node"), true);
-  assert.equal(await binaryOnPath("definitely-not-a-real-binary-turnbridge-xyz"), false);
+  assert.equal(await binaryOnPath("definitely-not-a-real-binary-threadhop-xyz"), false);
 });
 
 test("runLaunchPlan writes each note to stderr before spawning", async () => {
@@ -50,8 +50,8 @@ test("runLaunchPlan writes each note to stderr before spawning", async () => {
     const plan: LaunchPlan = { command: path, args: [], cwd: dir, notes: ["note one", "note two"] };
     const { result: code, writes } = await captureWrites(process.stderr, () => runLaunchPlan(plan));
     assert.equal(code, 0);
-    assert.ok(writes.some((w) => w.includes("turnbridge: note one")));
-    assert.ok(writes.some((w) => w.includes("turnbridge: note two")));
+    assert.ok(writes.some((w) => w.includes("threadhop: note one")));
+    assert.ok(writes.some((w) => w.includes("threadhop: note two")));
   });
 });
 
@@ -78,7 +78,7 @@ test("runLaunchPlan passes args and cwd through to the spawned command", async (
 
 test("runLaunchPlan reports a launch failure and returns 1 when the command cannot be found", async () => {
   const plan: LaunchPlan = {
-    command: join(tmpdir(), "turnbridge-test-no-such-binary-xyz"),
+    command: join(tmpdir(), "threadhop-test-no-such-binary-xyz"),
     args: [],
     cwd: tmpdir(),
     notes: [],

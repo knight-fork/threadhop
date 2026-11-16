@@ -34,7 +34,7 @@ export async function runProgram(options: { cledger: string; output: string; run
   await mkdir(options.output, { recursive: true });
   if (options.runtimeDirectory) {
     const manifest = JSON.parse(await readFile(join(options.runtimeDirectory, "runtimes.json"), "utf8"));
-    for (const runtime of manifest.runtimes) process.env[`TURNBRIDGE_VERIFY_${String(runtime.cli).toUpperCase().replaceAll("-", "_")}_BINARY`] = runtime.path;
+    for (const runtime of manifest.runtimes) process.env[`THREADHOP_VERIFY_${String(runtime.cli).toUpperCase().replaceAll("-", "_")}_BINARY`] = runtime.path;
   }
   const observations: Record<string, unknown>[] = [], evidence: BridgeEvidence[] = [];
   const snapshots = new Map<CliName, string>();
@@ -51,11 +51,11 @@ export async function runProgram(options: { cledger: string; output: string; run
     await writeFile(join(options.output, "matrix.json"), JSON.stringify(buildReport(evidence), null, 2) + "\n");
   };
   const run = async (source: CliName, target: CliName, mode: BridgeMode, sourceFile?: string) => {
-    const binary = process.env[`TURNBRIDGE_VERIFY_${target.toUpperCase().replaceAll("-", "_")}_BINARY`];
+    const binary = process.env[`THREADHOP_VERIFY_${target.toUpperCase().replaceAll("-", "_")}_BINARY`];
     process.stderr.write(`Verifying ${source} → ${target} (${mode}, ${sourceFile ? "installed source" : "target smoke"})\n`);
     const report = await runInstalledScenario({ source, target, mode, cledger: options.cledger, outputDirectory: options.output,
       timeoutMs: options.timeoutMs ?? 45_000, ...(binary ? { binary } : {}), ...(sourceFile ? { sourceFile } : {}),
-      ...((process.env.TURNBRIDGE_AIDER_PYTHON ?? process.env.TURNBRIDGE_VERIFY_AIDER_BINARY) ? { aiderPython: (process.env.TURNBRIDGE_AIDER_PYTHON ?? process.env.TURNBRIDGE_VERIFY_AIDER_BINARY)! } : {}) });
+      ...((process.env.THREADHOP_AIDER_PYTHON ?? process.env.THREADHOP_VERIFY_AIDER_BINARY) ? { aiderPython: (process.env.THREADHOP_AIDER_PYTHON ?? process.env.THREADHOP_VERIFY_AIDER_BINARY)! } : {}) });
     observations.push(report);
     const qualified = bridgeEvidence(report); if (qualified) evidence.push(qualified);
     // Snapshot discovery is confined to this run's artifacts, never newest-session heuristics.
@@ -98,7 +98,7 @@ async function main() {
     if (!["--cledger", "--output", "--runtime-dir", "--hub", "--only", "--timeout-ms", "--sources", "--require-core"].includes(args[i]!) || !args[i + 1]) throw Error(`Invalid option ${args[i]}`);
     values.set(args[i]!, args[i + 1]!);
   }
-  const cledger = values.get("--cledger") ?? process.env.TURNBRIDGE_VERIFY_CLEDGER;
+  const cledger = values.get("--cledger") ?? process.env.THREADHOP_VERIFY_CLEDGER;
   if (!cledger || !values.get("--output")) throw Error("Usage: program.js --cledger PATH --output DIRECTORY [--runtime-dir DIRECTORY] [--hub CLI] [--only CLI,...]");
   const parse = (value: string): CliName => { const cli = parseCliName(value); if (!cli) throw Error(`Unknown CLI ${value}`); return cli; };
   const hub = values.has("--hub") ? parse(values.get("--hub")!) : undefined;

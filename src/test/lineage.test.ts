@@ -38,7 +38,7 @@ test("annotates rows: source shows bridged-to, target shows continued-from", asy
       { role: "user", text: "start here", seq: 0, email: "me@x.com" },
     ]);
     await seedConversation(repo, TGT, "codex", [
-      { role: "user", text: "[turnbridge import notice] ...", seq: 0, email: "me@x.com" },
+      { role: "user", text: "[threadhop import notice] ...", seq: 0, email: "me@x.com" },
       { role: "user", text: "keep going in codex", seq: 1, email: "me@x.com" },
     ]);
     await recordContinuation(repo, {

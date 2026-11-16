@@ -25,7 +25,7 @@ export function qwenProjectId(cwd: string): string {
 }
 
 export function buildTextImport(summary: ConversationSummary, target: "pi" | "qwen-code", sessionId: string, cwd: string, version: string) {
-  const rows = [{ role: "user" as const, text: `[turnbridge import notice] Visible conversation imported from ${importSourceLabel(summary)}. Foreign tool calls/results and thinking are labeled text. This session has no original hidden state.`,
+  const rows = [{ role: "user" as const, text: `[threadhop import notice] Visible conversation imported from ${importSourceLabel(summary)}. Foreign tool calls/results and thinking are labeled text. This session has no original hidden state.`,
     eventId: "", timestamp: "2000-01-01T00:00:00.000Z" }, ...foldedTurns(summary)];
   let parent: string | null = null;
   const messages = rows.map(row => {
@@ -33,10 +33,10 @@ export function buildTextImport(summary: ConversationSummary, target: "pi" | "qw
     const previous = parent; parent = id;
     const stamp = Number.isFinite(Date.parse(row.timestamp)) ? new Date(row.timestamp).toISOString() : new Date().toISOString();
     if (target === "qwen-code") return { type: row.role, uuid: id, parentUuid: previous, sessionId, cwd, version, timestamp: stamp,
-      ...(row.role === "assistant" ? { model: "turnbridge-import" } : {}), message: { role: row.role === "assistant" ? "model" : "user", parts: [{ text: row.text }] } };
+      ...(row.role === "assistant" ? { model: "threadhop-import" } : {}), message: { role: row.role === "assistant" ? "model" : "user", parts: [{ text: row.text }] } };
     return { type: "message", id, parentId: previous, timestamp: stamp, message: {
       role: row.role, content: [{ type: "text", text: row.text }], timestamp: Date.parse(stamp),
-      ...(row.role === "assistant" ? { api: "openai-completions", provider: "turnbridge", model: "turnbridge-import", stopReason: "stop",
+      ...(row.role === "assistant" ? { api: "openai-completions", provider: "threadhop", model: "threadhop-import", stopReason: "stop",
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } : {}),
     } };
   });

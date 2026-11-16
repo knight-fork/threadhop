@@ -23,13 +23,13 @@ export async function runInstalledScenario(options: {
   await writeFile(join(bin, "cledger"), `#!${process.execPath}\nimport(${JSON.stringify(cledger)});\n`, { mode: 0o755 });
   const env = isolatedEnvironment(root, `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`);
   delete env.CI; delete env.NO_COLOR;
-  Object.assign(env, { TERM: "xterm-256color", TURNBRIDGE_HOME: join(root, ".turnbridge") });
-  if (options.aiderPython) env.TURNBRIDGE_AIDER_PYTHON = resolve(options.aiderPython);
+  Object.assign(env, { TERM: "xterm-256color", THREADHOP_HOME: join(root, ".threadhop") });
+  if (options.aiderPython) env.THREADHOP_AIDER_PYTHON = resolve(options.aiderPython);
   if (options.localModel) {
     validateInferenceProvider(options.localModel);
     if (options.localModel.tier === "usual-provider") {
-      if (!process.env.TURNBRIDGE_VERIFY_PROVIDER_API_KEY) throw Error("Set the dedicated TURNBRIDGE_VERIFY_PROVIDER_API_KEY explicitly for a paid canary");
-      env.TURNBRIDGE_VERIFY_PROVIDER_API_KEY = process.env.TURNBRIDGE_VERIFY_PROVIDER_API_KEY;
+      if (!process.env.THREADHOP_VERIFY_PROVIDER_API_KEY) throw Error("Set the dedicated THREADHOP_VERIFY_PROVIDER_API_KEY explicitly for a paid canary");
+      env.THREADHOP_VERIFY_PROVIDER_API_KEY = process.env.THREADHOP_VERIFY_PROVIDER_API_KEY;
     }
   }
   const spec: WorkerOptions = { root, source: options.source, target: options.target, mode: options.mode, cledger,
@@ -46,7 +46,7 @@ export async function runInstalledScenario(options: {
 async function main() {
   const args = process.argv.slice(2);
   let selected: CliName[] = CLI_CATALOG.map(cli => cli.id), source: CliName = "claude-code", mode: BridgeMode = "bootstrap";
-  let output = join(tmpdir(), "turnbridge-installed-evidence"), cledger = process.env.TURNBRIDGE_VERIFY_CLEDGER, timeoutMs = 60_000, sourceFile: string | undefined, localModel: LocalModelConfig | undefined;
+  let output = join(tmpdir(), "threadhop-installed-evidence"), cledger = process.env.THREADHOP_VERIFY_CLEDGER, timeoutMs = 60_000, sourceFile: string | undefined, localModel: LocalModelConfig | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i], value = args[++i];
     if (!value) throw Error(`Missing value for ${arg}`);
@@ -61,14 +61,14 @@ async function main() {
     else if (arg === "--timeout-ms") { timeoutMs = Number(value); if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 180000) throw Error("Timeout must be 1000–180000 milliseconds"); }
     else throw Error(`Unknown option ${arg}`);
   }
-  if (!cledger) throw Error("Supply --cledger /path/to/merged-cledger/dist/cli.js (or TURNBRIDGE_VERIFY_CLEDGER)");
+  if (!cledger) throw Error("Supply --cledger /path/to/merged-cledger/dist/cli.js (or THREADHOP_VERIFY_CLEDGER)");
   const reports = [];
   for (const target of selected) {
     if (source === target) continue;
-    const binary = process.env[`TURNBRIDGE_VERIFY_${target.toUpperCase().replaceAll("-", "_")}_BINARY`];
+    const binary = process.env[`THREADHOP_VERIFY_${target.toUpperCase().replaceAll("-", "_")}_BINARY`];
     process.stderr.write(`Verifying ${source} → ${target} (${mode})\n`);
     const report = await runInstalledScenario({ source, target, mode, cledger, outputDirectory: output, timeoutMs, ...(localModel ? { localModel } : {}),
-      ...(binary ? { binary } : {}), ...(sourceFile ? { sourceFile } : {}), ...((process.env.TURNBRIDGE_AIDER_PYTHON ?? process.env.TURNBRIDGE_VERIFY_AIDER_BINARY) ? { aiderPython: (process.env.TURNBRIDGE_AIDER_PYTHON ?? process.env.TURNBRIDGE_VERIFY_AIDER_BINARY)! } : {}) });
+      ...(binary ? { binary } : {}), ...(sourceFile ? { sourceFile } : {}), ...((process.env.THREADHOP_AIDER_PYTHON ?? process.env.THREADHOP_VERIFY_AIDER_BINARY) ? { aiderPython: (process.env.THREADHOP_AIDER_PYTHON ?? process.env.THREADHOP_VERIFY_AIDER_BINARY)! } : {}) });
     reports.push(report);
     process.stderr.write(`[${report.status}] ${report.target}: ${report.reason || "all gates passed"}\n`);
     await mkdir(output, { recursive: true });

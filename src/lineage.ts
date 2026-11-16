@@ -40,8 +40,8 @@ export async function recordContinuation(
     {
       kind: CONTINUATION_KIND,
       occurred_at: occurredAt,
-      actor: { type: "system", id: "turnbridge" },
-      producer: { tool: "turnbridge", version: rec.version, source: rec.targetCli },
+      actor: { type: "system", id: "threadhop" },
+      producer: { tool: "threadhop", version: rec.version, source: rec.targetCli },
       // belongs to the target conversation so it rides along with it
       stream: { id: rec.target, seq: 0 },
       links: [{ rel: CONTINUES_REL, target: rec.source }],
@@ -82,7 +82,7 @@ function parseRecord(event: EvidenceEvent): ContinuationRecord | null {
 export async function readLineage(repo: RepoInfo, anyCommit = false): Promise<Lineage> {
   const events = await readEvents(repo, {
     kind: CONTINUATION_KIND,
-    tool: "turnbridge",
+    tool: "threadhop",
     ...(anyCommit ? {} : { reachableFrom: "HEAD" }),
   });
   const parentOf = new Map<string, ContinuationRecord>();

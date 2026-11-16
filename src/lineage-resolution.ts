@@ -15,15 +15,18 @@ function atOrBefore(event: EvidenceEvent, iso: string): boolean {
   return false;
 }
 
-function isTurnbridgeNotice(event: EvidenceEvent): boolean {
+// Sessions imported before the rename carry the legacy "[turnbridge import
+// notice]" prefix; recognize both so older lineage still filters correctly.
+const IMPORT_NOTICE_PREFIXES = ["[threadhop import notice]", "[turnbridge import notice]"];
+
+function isThreadhopNotice(event: EvidenceEvent): boolean {
   const content = turnContent(event);
   return Boolean(
-    content?.blocks.some(
-      (block) =>
-        block.type === "text" &&
-        typeof block.text === "string" &&
-        block.text.trimStart().startsWith("[turnbridge import notice]"),
-    ),
+    content?.blocks.some((block) => {
+      if (block.type !== "text" || typeof block.text !== "string") return false;
+      const text = block.text.trimStart();
+      return IMPORT_NOTICE_PREFIXES.some((prefix) => text.startsWith(prefix));
+    }),
   );
 }
 
@@ -47,7 +50,7 @@ function lineageSources(summary: ConversationSummary, lineage: Lineage): string[
 }
 
 /**
- * Replace turnbridge-authored copies with the source events recorded in their
+ * Replace threadhop-authored copies with the source events recorded in their
  * continuation edge. New records already contain flattened origin ids, so a
  * later hop reads each turn from where it originated rather than from the
  * preceding copy. Legacy records recurse through their source conversation.
@@ -74,7 +77,7 @@ export function resolveLineageHistory(
 
     if (resolving.has(summary.id)) {
       notes.add(`lineage cycle detected at ${summary.id}; using the captured copy`);
-      return selectedEvents.filter((event) => !isTurnbridgeNotice(event));
+      return selectedEvents.filter((event) => !isThreadhopNotice(event));
     }
 
     const copied = selectedEvents.filter((event) => atOrBefore(event, parent.occurredAt));
@@ -107,7 +110,7 @@ export function resolveLineageHistory(
             return !(
               ownerParent &&
               atOrBefore(event, ownerParent.occurredAt) &&
-              isTurnbridgeNotice(event)
+              isThreadhopNotice(event)
             );
           })
           .map(({ event }) => event);
@@ -123,7 +126,7 @@ export function resolveLineageHistory(
       );
       // Bootstrap reads a transcript into a fresh session; it has no native
       // history copy. Its own turns are already retained in originatedHere.
-      origins = parent.mode === "bootstrap" ? [] : copied.filter((event) => !isTurnbridgeNotice(event));
+      origins = parent.mode === "bootstrap" ? [] : copied.filter((event) => !isThreadhopNotice(event));
     }
     return [...origins, ...originatedHere];
   };

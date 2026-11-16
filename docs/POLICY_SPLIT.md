@@ -8,7 +8,7 @@ Nothing here is decided yet.
 ## 0. Where the note came from
 
 The tier list was written on 2026-08-06, immediately after
-`providerID: "turnbridge"` bricked continuation on every bridged opencode
+`providerID: "threadhop"` bricked continuation on every bridged opencode
 session. It is a post-mortem generalization: one field was assumed portable,
 wasn't, and the fix needed somewhere to live. That origin matters, because a
 model derived from a single incident tends to encode that incident's shape
@@ -155,7 +155,7 @@ once; adapters do not touch them."
 - **Picker title** (`ai-title`): computed from tier-1 content by a
   target-specific rule. Not carried, not constructed — *derived*. Duplicated
   verbatim today in `claude-code.ts:134` and `opencode.ts:348`.
-- **The import notice itself**: turnbridge's own field, present in no source.
+- **The import notice itself**: threadhop's own field, present in no source.
   It is the sink every tier-2 disclosure drains into, which makes it
   structurally special and worth naming as such.
 - **Actor identity** (`actor.id`, the git email): a genuine ledger-side fact
@@ -223,7 +223,7 @@ unified assertions (tier 1's enforcement).
 ## 5. Concerns, and where this cuts against the project's aims
 
 **The tier model is a concession framework, and concessions ratchet one way.**
-Turnbridge's differentiator over "summarize and paste" is literal replication.
+Threadhop's differentiator over "summarize and paste" is literal replication.
 The tier list names the sanctioned ways replication is allowed to fail — which
 is necessary, but once a field is labeled tier 2 the cheap path is always
 "substitute and disclose," because disclosure is free and always available.
@@ -244,10 +244,10 @@ other direction:
 
 **Disclosure has a budget.** The import notice is a user turn injected at the
 top of the target model's context. Every substitution that appends a sentence
-spends context on turnbridge meta-text before the conversation the user came
+spends context on threadhop meta-text before the conversation the user came
 for. Three or four disclosures in and the notice is competing with the
 history it introduces. The degradation ledger should be able to summarize —
-"4 fields adapted for Codex; details in the turnbridge log" — rather than
+"4 fields adapted for Codex; details in the threadhop log" — rather than
 concatenate indefinitely. Worth deciding what the notice is *for*: is it a
 legal-style completeness record, or the minimum the model and user need? Those
 give different designs, and right now it is drifting toward the first while

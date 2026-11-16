@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
-/** turnbridge's own package version, for producer provenance. */
-export function turnbridgeVersion(): string {
+/** threadhop's own package version, for producer provenance. */
+export function threadhopVersion(): string {
   try {
     const pkg = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8"),

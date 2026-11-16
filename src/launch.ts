@@ -9,13 +9,13 @@ export async function binaryOnPath(binary: string): Promise<boolean> {
 
 /** Hand the terminal over to the target CLI; returns its exit code. */
 export function runLaunchPlan(plan: LaunchPlan): number {
-  for (const note of plan.notes) process.stderr.write(`turnbridge: ${note}\n`);
+  for (const note of plan.notes) process.stderr.write(`threadhop: ${note}\n`);
   const result = spawnSync(plan.command, plan.args, {
     cwd: plan.cwd,
     stdio: "inherit",
   });
   if (result.error) {
-    process.stderr.write(`turnbridge: failed to launch ${plan.command}: ${result.error.message}\n`);
+    process.stderr.write(`threadhop: failed to launch ${plan.command}: ${result.error.message}\n`);
     return 1;
   }
   if (result.status !== null) return result.status;

@@ -82,7 +82,7 @@ const B = "codex:b";
 const C = "opencode:c";
 
 test("bootstrap with unavailable origins keeps each continuation once and omits its bootstrap prompt", () => {
-  const prompt = event("bootstrap-prompt", B, 0, "2026-01-01T00:00:00.000Z", "[turnbridge bootstrap token] read history");
+  const prompt = event("bootstrap-prompt", B, 0, "2026-01-01T00:00:00.000Z", "[threadhop bootstrap token] read history");
   const work = event("bootstrap-work", B, 1, "2026-01-01T00:01:00.000Z", "continued work");
   const child = summary(B, [prompt, work]);
   const edge: ContinuationRecord = {
@@ -102,7 +102,7 @@ const bNotice = event(
   B,
   0,
   "2026-01-31T23:59:59.000Z",
-  "[turnbridge import notice] stale notice",
+  "[threadhop import notice] stale notice",
 );
 const b1 = event("ev2-b1", B, 1, a1.occurred_at, "degraded question copy");
 const b2 = event("ev2-b2", B, 2, a2.occurred_at, "assistant:degraded answer copy");
@@ -112,7 +112,7 @@ const cNotice = event(
   C,
   0,
   "2026-02-28T23:59:59.000Z",
-  "[turnbridge import notice] another stale notice",
+  "[threadhop import notice] another stale notice",
 );
 const c1 = event("ev2-c1", C, 1, a1.occurred_at, "second-generation copy");
 const c2 = event("ev2-c2", C, 2, a2.occurred_at, "assistant:second-generation copy");
@@ -147,6 +147,23 @@ test("unavailable origins fall back to the captured copy and disclose it", () =>
   assert.match(resolved.notes[0]!, /original events.*unavailable.*captured copy/);
 });
 
+test("import notices written under the legacy turnbridge name are still filtered", () => {
+  const legacyNotice = event(
+    "ev2-ln",
+    B,
+    0,
+    "2026-01-31T23:59:59.000Z",
+    "[turnbridge import notice] notice from before the rename",
+  );
+  const b = summary(B, [legacyNotice, b1, b2, b3]);
+  const lineage = graph([
+    record(A, B, "2026-02-01T00:00:00.000Z", [a1.id, "ev2-missing"]),
+  ]);
+
+  const resolved = resolveLineageHistory(b, [b], lineage);
+  assert.deepEqual(resolved.summary.events.map((item) => item.id), [b1.id, b2.id, b3.id]);
+});
+
 test("legacy lineage without source ids resolves through the source seq boundary", () => {
   const a = summary(A, [a1, a2]);
   const b = summary(B, [bNotice, b1, b2, b3]);
@@ -165,7 +182,7 @@ test("a later capable target recovers reasoning dropped by an intermediate targe
   const answer = event("ev2-ra", codex, 2, "2026-04-01T00:00:02.000Z", "assistant:because");
   const origin = summary(codex, [question, hidden, answer]);
   const copy = summary(claude, [
-    event("ev2-rn", claude, 0, "2026-04-30T23:59:59.000Z", "[turnbridge import notice]"),
+    event("ev2-rn", claude, 0, "2026-04-30T23:59:59.000Z", "[threadhop import notice]"),
     event("ev2-rc1", claude, 1, question.occurred_at, "why?"),
     event("ev2-rc2", claude, 2, answer.occurred_at, "assistant:because"),
   ]);

@@ -35,8 +35,8 @@ being repeated here.
 
 ## Release
 
-- Publish `conversation-ledger` to npm, replace turnbridge's local `file:`
-  dependency with a semver range, and then publish turnbridge. The
+- Publish `conversation-ledger` to npm, replace threadhop's local `file:`
+  dependency with a semver range, and then publish threadhop. The
   `prepublishOnly` check deliberately blocks publishing before this is done.
 - Re-run the interactive, recall, invariant, large-history, function-call, and
   picker probes against the release CLI versions. Scheduled candidate maintenance opens draft evidence proposals; runtime pins

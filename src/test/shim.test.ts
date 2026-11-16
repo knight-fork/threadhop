@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { shimDir, shimInstall, shimStatus, shimUninstall } from "../shim.js";
 
-const RC_MARKER = "# added by `turnbridge shim install`";
+const RC_MARKER = "# added by `threadhop shim install`";
 
 interface ShimEnv {
   home: string;
@@ -15,7 +15,7 @@ interface ShimEnv {
 /**
  * Isolates shim.ts's two real-filesystem touchpoints:
  *  - HOME, which os.homedir() reads live, so ~/.zshrc becomes <fakeHome>/.zshrc
- *  - TURNBRIDGE_HOME, which configDir() (and therefore shimDir()) reads directly
+ *  - THREADHOP_HOME, which configDir() (and therefore shimDir()) reads directly
  *  - PATH, restricted to /usr/bin:/bin (so `which` itself still resolves) plus
  *    an optional temp bin dir seeded with fake `claude`/`codex` executables —
  *    never the real CLIs, which this dev machine may well have installed.
@@ -24,9 +24,9 @@ async function withShimEnv<T>(
   opts: { seedBinaries?: boolean },
   fn: (env: ShimEnv) => Promise<T>,
 ): Promise<T> {
-  const home = await mkdtemp(join(tmpdir(), "turnbridge-shim-home-"));
-  const turnbridgeHome = await mkdtemp(join(tmpdir(), "turnbridge-shim-th-"));
-  const binDir = await mkdtemp(join(tmpdir(), "turnbridge-shim-bin-"));
+  const home = await mkdtemp(join(tmpdir(), "threadhop-shim-home-"));
+  const threadhopHome = await mkdtemp(join(tmpdir(), "threadhop-shim-th-"));
+  const binDir = await mkdtemp(join(tmpdir(), "threadhop-shim-bin-"));
 
   if (opts.seedBinaries) {
     for (const name of ["claude", "codex"]) {
@@ -37,11 +37,11 @@ async function withShimEnv<T>(
   }
 
   const prevHome = process.env["HOME"];
-  const prevTh = process.env["TURNBRIDGE_HOME"];
+  const prevTh = process.env["THREADHOP_HOME"];
   const prevPath = process.env["PATH"];
 
   process.env["HOME"] = home;
-  process.env["TURNBRIDGE_HOME"] = turnbridgeHome;
+  process.env["THREADHOP_HOME"] = threadhopHome;
   process.env["PATH"] = opts.seedBinaries ? `${binDir}:/usr/bin:/bin` : "/usr/bin:/bin";
 
   try {
@@ -49,12 +49,12 @@ async function withShimEnv<T>(
   } finally {
     if (prevHome === undefined) delete process.env["HOME"];
     else process.env["HOME"] = prevHome;
-    if (prevTh === undefined) delete process.env["TURNBRIDGE_HOME"];
-    else process.env["TURNBRIDGE_HOME"] = prevTh;
+    if (prevTh === undefined) delete process.env["THREADHOP_HOME"];
+    else process.env["THREADHOP_HOME"] = prevTh;
     if (prevPath === undefined) delete process.env["PATH"];
     else process.env["PATH"] = prevPath;
     await rm(home, { recursive: true, force: true });
-    await rm(turnbridgeHome, { recursive: true, force: true });
+    await rm(threadhopHome, { recursive: true, force: true });
     await rm(binDir, { recursive: true, force: true });
   }
 }
@@ -112,9 +112,9 @@ test("shimInstall writes both shims and adds a single PATH line to ~/.zshrc; rei
     const claudeShimContent = await readFile(claudeShimPath, "utf8");
     const codexShimContent = await readFile(codexShimPath, "utf8");
 
-    assert.match(claudeShimContent, /exec turnbridge resume claude-code/);
+    assert.match(claudeShimContent, /exec threadhop resume claude-code/);
     assert.ok(claudeShimContent.includes(join(env.binDir, "claude")));
-    assert.match(codexShimContent, /exec turnbridge resume codex/);
+    assert.match(codexShimContent, /exec threadhop resume codex/);
     assert.ok(codexShimContent.includes(join(env.binDir, "codex")));
 
     const mode = (await stat(claudeShimPath)).mode & 0o777;
@@ -131,7 +131,7 @@ test("shimInstall writes both shims and adds a single PATH line to ~/.zshrc; rei
     // installing again must not duplicate the marker or the PATH export
     await shimInstall();
     const rcAfterSecondInstall = await readFile(join(env.home, ".zshrc"), "utf8");
-    const markerCount = (rcAfterSecondInstall.match(/# added by `turnbridge shim install`/g) ?? []).length;
+    const markerCount = (rcAfterSecondInstall.match(/# added by `threadhop shim install`/g) ?? []).length;
     assert.equal(markerCount, 1);
     const pathLineCount = (
       rcAfterSecondInstall.match(new RegExp(`export PATH="${shimDir()}`, "g")) ?? []
@@ -149,7 +149,7 @@ test("shimInstall skips CLIs missing from PATH and returns 1 when neither is fou
   });
 });
 
-test("shimUninstall removes the shim dir and cleans only the turnbridge lines from ~/.zshrc", async () => {
+test("shimUninstall removes the shim dir and cleans only the threadhop lines from ~/.zshrc", async () => {
   await withShimEnv({ seedBinaries: true }, async (env) => {
     await writeFile(join(env.home, ".zshrc"), "export FOO=bar\n");
     await shimInstall();

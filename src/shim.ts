@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { configDir } from "./config.js";
 
-const RC_MARKER = "# added by `turnbridge shim install`";
+const RC_MARKER = "# added by `threadhop shim install`";
 
 export function shimDir(): string {
   return join(configDir(), "shims");
@@ -21,10 +21,10 @@ function resolveRealBinary(binary: string): string | null {
 function claudeShim(realPath: string): string {
   return `#!/bin/sh
 ${RC_MARKER}
-# Bare \`claude --resume\` opens the turnbridge merged picker; everything else
+# Bare \`claude --resume\` opens the threadhop merged picker; everything else
 # passes through to the real binary.
 if [ "$#" -eq 1 ] && { [ "$1" = "--resume" ] || [ "$1" = "-r" ]; }; then
-  exec turnbridge resume claude-code
+  exec threadhop resume claude-code
 fi
 exec "${realPath}" "$@"
 `;
@@ -33,10 +33,10 @@ exec "${realPath}" "$@"
 function codexShim(realPath: string): string {
   return `#!/bin/sh
 ${RC_MARKER}
-# Bare \`codex resume\` opens the turnbridge merged picker; everything else
+# Bare \`codex resume\` opens the threadhop merged picker; everything else
 # passes through to the real binary.
 if [ "$#" -eq 1 ] && [ "$1" = "resume" ]; then
-  exec turnbridge resume codex
+  exec threadhop resume codex
 fi
 exec "${realPath}" "$@"
 `;
@@ -51,7 +51,7 @@ exec "${realPath}" "$@"
  * would discard the id the user typed, and re-launching through the shim would
  * recurse), `-c`/`--continue` names a specific session (the last one), and bare
  * `opencode` starts a new session. Users reach the merged picker by running
- * `turnbridge resume opencode` directly.
+ * `threadhop resume opencode` directly.
  */
 
 function rcPath(): string {
@@ -77,24 +77,24 @@ export async function shimInstall(): Promise<number> {
   ] as const) {
     const real = resolveRealBinary(binary);
     if (!real) {
-      process.stderr.write(`turnbridge: ${binary} not found on PATH; skipping its shim\n`);
+      process.stderr.write(`threadhop: ${binary} not found on PATH; skipping its shim\n`);
       continue;
     }
     const path = join(dir, binary);
     await writeFile(path, template(real));
     await chmod(path, 0o755);
-    process.stderr.write(`turnbridge: shim written: ${path} -> ${real}\n`);
+    process.stderr.write(`threadhop: shim written: ${path} -> ${real}\n`);
     wrote++;
   }
   if (wrote === 0) return 1;
 
   if (await rcHasShimPath()) {
-    process.stderr.write("turnbridge: PATH entry already present in ~/.zshrc\n");
+    process.stderr.write("threadhop: PATH entry already present in ~/.zshrc\n");
   } else {
     const line = `\n${RC_MARKER}\nexport PATH="${dir}:$PATH"\n`;
     await writeFile(rcPath(), line, { flag: "a" });
     process.stderr.write(
-      "turnbridge: added shim dir to PATH in ~/.zshrc — restart your shell or `source ~/.zshrc`\n",
+      "threadhop: added shim dir to PATH in ~/.zshrc — restart your shell or `source ~/.zshrc`\n",
     );
   }
   return 0;
@@ -112,7 +112,7 @@ export async function shimUninstall(): Promise<number> {
   } catch {
     // no rc file — nothing to clean
   }
-  process.stderr.write("turnbridge: shims removed\n");
+  process.stderr.write("threadhop: shims removed\n");
   return 0;
 }
 

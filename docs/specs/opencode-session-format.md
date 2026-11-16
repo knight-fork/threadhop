@@ -1,6 +1,6 @@
 # opencode native session / import format — reverse-engineering spec
 
-Purpose: enable `turnbridge` to FABRICATE an opencode session that `opencode -s <id>` will
+Purpose: enable `threadhop` to FABRICATE an opencode session that `opencode -s <id>` will
 resume with the fabricated prior conversation visible to the model and rendered in the TUI.
 
 Pinned environment:
@@ -22,7 +22,7 @@ database: `~/.local/share/opencode/opencode.db`. Relevant tables: `session`, `se
 
 Consequence for fabrication: there is no "write a new file into a directory the CLI scans"
 path. The two options are writing SQLite directly (schema-coupled, racy against a running
-opencode) or going through opencode's own ingestion command. **turnbridge uses the latter.**
+opencode) or going through opencode's own ingestion command. **threadhop uses the latter.**
 
 ## 2. Commands
 
@@ -50,7 +50,7 @@ Verified properties of `import`:
   message or part was at fault.
 
 There is **no argument-free "open the session picker" invocation** — `-s` always takes an id,
-`-c` names a specific session, bare `opencode` starts a new one. This is why turnbridge installs
+`-c` names a specific session, bare `opencode` starts a new one. This is why threadhop installs
 no opencode shim (see `src/shim.ts`).
 
 ## 3. Envelope
@@ -71,9 +71,9 @@ Observed on a real export:
   "id": "ses_042f83972ffeNdS75n197unLAD",
   "slug": "tidy-moon",
   "projectID": "5687eeea165450405ca0226fde0ab28e91701579",
-  "directory": "/Users/me/repos/turnbridge",
+  "directory": "/Users/me/repos/threadhop",
   "path": "",
-  "title": "Turnbridge opencode support check",
+  "title": "Threadhop opencode support check",
   "agent": "build",
   "model": { "id": "deepseek-v4-flash", "providerID": "ds4" },
   "version": "1.18.5",
@@ -84,18 +84,18 @@ Observed on a real export:
 }
 ```
 
-- `id` — arbitrary string, not a UUID. Native ids are `ses_<base62>`; turnbridge writes
+- `id` — arbitrary string, not a UUID. Native ids are `ses_<base62>`; threadhop writes
   `ses_tb_<uuid>` so bridged sessions are identifiable on sight. Accepted without complaint.
 - **`projectID` is load-bearing and is honored verbatim.** It scopes which directory lists the
   session. Ids are opaque hashes stored in the `project` table — *not* a plain sha1 of the
   worktree path (checked: sha1 of the path, path+newline, and lowercased path all mismatch), so
   they must be **looked up**, via `opencode debug scrap`, matching `worktree` against the launch
   cwd. `"global"` is a real fallback project (worktree `/`); a session filed there is listed
-  from **every** directory, which is why turnbridge only uses it when the cwd maps to no
+  from **every** directory, which is why threadhop only uses it when the cwd maps to no
   registered project.
 - `title` — what `session list` and the TUI picker display. Fabricated sessions title themselves
   by the first human message, not by the import notice (same reasoning as the other targets).
-- `time.updated` is the picker's sort key; turnbridge stamps it `now` so a freshly bridged
+- `time.updated` is the picker's sort key; threadhop stamps it `now` so a freshly bridged
   session sorts to the top even though its *messages* are backdated (§4).
 - `permission` was written by an earlier draft of the adapter and is **not** present on real
   exports; it imports fine but is not part of the format.
@@ -134,7 +134,7 @@ it renders **last**, and a trailing user message with no assistant reply renders
 **`QUEUED`** badge — i.e. it reads as a prompt about to be sent rather than a preamble.
 
 This is the opposite of the Claude Code target, where the notice is deliberately stamped `now`
-because that format renders in file order. turnbridge therefore backdates the opencode notice to
+because that format renders in file order. threadhop therefore backdates the opencode notice to
 `earliest_event_ms - 1`. Verified: notice renders first, no `QUEUED` badge.
 
 ### 4.1 Ids are an ordering key too *(added 2026-08-06, 1.18.5)*
@@ -145,12 +145,12 @@ bit us:
 - **Parts within a message are ordered by `id`, not by array position.** Measured: a fabricated
   assistant message's exported part order was exactly its id-sorted order, while native part ids
   ascend with emission (`prt_fd479a2f1001…` step-start < `prt_fd479a6c4001…` text <
-  `prt_fd479a716001…` step-finish). This was invisible while turnbridge emitted exactly one part
+  `prt_fd479a716001…` step-finish). This was invisible while threadhop emitted exactly one part
   per message; adding step-start/step-finish surfaced it immediately, with `step-finish` exported
   ahead of `step-start`. Part ids must therefore be minted in the order the parts should appear —
   including allocating the `step-start` id *before* converting the message's content parts.
 - **Message ids must also sort ahead of ids opencode mints later.** Native ids are time-ascending
-  base62 (`msg_fd4799cd2001…` < `msg_fd4b3c98d001…`), presently in the `f` range. turnbridge's
+  base62 (`msg_fd4799cd2001…` < `msg_fd4b3c98d001…`), presently in the `f` range. threadhop's
   old `msg_tb_<uuid>` lost twice: `t` sorts after `f`, so every fabricated message ranked *after*
   the reply opencode was about to write, and the uuid randomized history against itself.
   Observed effect: a resumed fabricated session answered and then **kept generating** — 10-13
@@ -160,7 +160,7 @@ bit us:
   model. The rendered transcript looked correct throughout, which is why this hid behind the
   provider bug in §6.
 
-turnbridge now writes `msg_0tb<counter><rand>` and `prt_tb_<stamp><counter><rand>`.
+threadhop now writes `msg_0tb<counter><rand>` and `prt_tb_<stamp><counter><rand>`.
 
 ## 5. Parts
 
@@ -175,7 +175,7 @@ Every part carries `id` (`prt_…`), `sessionID`, `messageID`.
   carrying a `snapshot` git sha; `step-finish` also carries `reason`, `tokens`, `cost`.
   *Revised 2026-08-06:* the earlier note here said `step-start` was "not required", because a bare
   `text` part renders fine — which is true of **rendering** and was the wrong test. The TUI and
-  the agent loop are built around these parts, so turnbridge now emits both, with the launch
+  the agent loop are built around these parts, so threadhop now emits both, with the launch
   repo's `HEAD` as `snapshot` (omitted outside a git repo) rather than inventing a sha. Mind §4.1:
   the `step-start` id has to be allocated before the content parts or it sorts after them.
 - **`tool`** — `{ type: "tool", tool: <name>, callID, state, … }`. **`state` requires all six of
@@ -198,21 +198,21 @@ Every part carries `id` (`prt_…`), `sessionID`, `messageID`.
 > bridged opencode session from 2026-08-02 until it was found. It is kept, struck through, so
 > the failure mode is recognizable if it recurs on another target.
 
-turnbridge writes `modelID: <source model>` with `providerID: "turnbridge"`, per the old
+threadhop writes `modelID: <source model>` with `providerID: "threadhop"`, per the old
 fabrication-contract rule to propagate the source model id verbatim and never substitute a
 recognized-but-false one.
 
 ~~Observed consequence on resume: opencode shows a one-time toast —
-`Model turnbridge/<model> is not valid` — and the composer falls back to the user's configured
+`Model threadhop/<model> is not valid` — and the composer falls back to the user's configured
 model, which is accurate: the bridge did change models. History renders in full either way.~~
 
 **What actually happens.** The toast is real and the *composer* does fall back, but opencode's
 **agent loop** resolves the model from the session's stored `providerID`/`modelID`, not from the
-composer, `-m`, or the TUI model picker. There is no provider named `turnbridge`, so the loop
+composer, `-m`, or the TUI model picker. There is no provider named `threadhop`, so the loop
 throws and exits before issuing any request:
 
 ```
-ERROR message=failed error="ProviderModelNotFoundError: Model not found: turnbridge/<model>."
+ERROR message=failed error="ProviderModelNotFoundError: Model not found: threadhop/<model>."
 ```
 
 Logs show `loop step=0` → `exiting loop` with **no `stream` line**, where a native session logs
@@ -223,7 +223,7 @@ prompt (it is persisted as a `user` message with no assistant reply); filed unde
 surfaces as `UnknownError: Unexpected server error`. In both cases history renders in full — the
 session is readable and un-continuable, which is why the TUI check missed it.
 
-Patching only the four `"providerID": "turnbridge"` occurrences to `"opencode"`, changing nothing
+Patching only the four `"providerID": "threadhop"` occurrences to `"opencode"`, changing nothing
 else, restores continuation **and** the model correctly recalls a marker planted in the bridged
 history. Fabrication was never at fault: the model does read bridged context.
 
@@ -231,7 +231,7 @@ The contract now says to propagate the source model id only where the target can
 otherwise to write a resolvable value and disclose the real source model in the import notice —
 `providerID` is a dispatch field, not a provenance field.
 
-**What turnbridge does now.** At fabricate time it lists `opencode models` and resolves the
+**What threadhop does now.** At fabricate time it lists `opencode models` and resolves the
 source model against it: an exact `provider/model`, or an unambiguous bare model id, is kept
 verbatim (opencode→opencode, or a user who registered the same model, keeps its own). Otherwise
 it substitutes the model opencode itself would start a new session of the bridged agent (`build`)

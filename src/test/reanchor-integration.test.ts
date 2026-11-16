@@ -11,10 +11,10 @@ const SRC = "claude-code:88888888-8888-4888-8888-888888888888";
 const TGT = "codex:99999999-9999-4999-8999-999999999999";
 
 /**
- * The squash-merge scenario through turnbridge's own read path: a bridged
+ * The squash-merge scenario through threadhop's own read path: a bridged
  * conversation pair captured on a feature branch, branch squashed onto main
  * (simulated by an ordinary commit — establishing the mapping is cledger
- * detection's job, resolution is what turnbridge depends on), re_anchor
+ * detection's job, resolution is what threadhop depends on), re_anchor
  * mapping anchored to the squash commit. Both the conversations and the
  * continuation edge must survive in the picker's HEAD-scoped view.
  */

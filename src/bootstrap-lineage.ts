@@ -13,7 +13,7 @@ interface PendingBootstrap {
 
 export async function recordPendingBootstrap(repo: RepoInfo, pending: PendingBootstrap): Promise<void> {
   await appendEvents(repo, [{ kind: "bootstrap_continuation_pending", occurred_at: new Date().toISOString(),
-    actor: { type: "system", id: "turnbridge" }, producer: { tool: "turnbridge", source: pending.targetCli, version: pending.version },
+    actor: { type: "system", id: "threadhop" }, producer: { tool: "threadhop", source: pending.targetCli, version: pending.version },
     content: { ...pending }, links: [{ rel: "continues", target: pending.source }] }]);
 }
 
@@ -26,7 +26,7 @@ function pendingRecord(event: EvidenceEvent): PendingBootstrap | null {
 
 /** Correlate only an exact unique token in a captured user turn; never latest-session guessing. */
 export async function reconcileBootstrapContinuations(repo: RepoInfo): Promise<number> {
-  const pending = await readEvents(repo, { kind: "bootstrap_continuation_pending", tool: "turnbridge" });
+  const pending = await readEvents(repo, { kind: "bootstrap_continuation_pending", tool: "threadhop" });
   if (!pending.length) return 0;
   const turns = await readEvents(repo, { kind: "conversation_turn" });
   const lineage = await readLineage(repo, true);
@@ -34,7 +34,7 @@ export async function reconcileBootstrapContinuations(repo: RepoInfo): Promise<n
   for (const event of pending) {
     const record = pendingRecord(event);
     if (!record) continue;
-    const marker = `[turnbridge bootstrap ${record.token}]`;
+    const marker = `[threadhop bootstrap ${record.token}]`;
     const matches = turns.filter(turn => turn.producer.source === record.targetCli && turn.actor.type === "human" && turn.stream?.id &&
       turnContent(turn)?.blocks.some(block => {
         if (block.type !== "text" || typeof block.text !== "string") return false;

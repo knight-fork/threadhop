@@ -12,13 +12,13 @@ adapters are version-pinned and must be revalidated per CLI release.
    to tail — cledger captures it through a `session.idle` plugin that converts
    `opencode export`, one event per *part*, since its store is mutable
    (cledger 0.18.0+).
-2. `turnbridge resume [claude|codex|opencode]` lists conversations compatible with the
+2. `threadhop resume [claude|codex|opencode]` lists conversations compatible with the
    current repository state: events anchored to commits reachable from `HEAD`
    (`--any-commit` lifts this), authored by you or unattributed
    (`--all` includes collaborators).
 3. Selecting a conversation whose source matches the target CLI delegates to
    that CLI's native resume.
-4. Cross-CLI selections default to **native fabrication**: turnbridge writes a
+4. Cross-CLI selections default to **native fabrication**: threadhop writes a
    target-native session file from the canonical events and launches the
    target's own resume on it. `--bootstrap` (also the automatic fallback when
    fabrication is unsupported or fails validation) starts a fresh target
@@ -42,18 +42,18 @@ adapters are version-pinned and must be revalidated per CLI release.
 ## Division of labor with Conversation Ledger
 
 The ledger owns capture (adapters, cursors, idempotent event ids, git-notes
-storage, transport). Turnbridge never parses source transcripts itself and
+storage, transport). Threadhop never parses source transcripts itself and
 is a reader plus a writer of *target-native* session files. It writes exactly
 one kind of ledger event — `continuation` lineage edges (below) — and no
-conversation content. Ledger changes made for turnbridge: a library entry
+conversation content. Ledger changes made for threadhop: a library entry
 point (`package.json` exports) and human-turn identity stamping.
 
-Turnbridge's reads inherit cledger 0.8.0's read-time behavior: `readEvents()`
+Threadhop's reads inherit cledger 0.8.0's read-time behavior: `readEvents()`
 lazily absorbs whatever transport already fetched into the local ref, then
 auto-runs squash/rebase re-anchor detection, which can append a `re_anchor`
 mapping event and print a notice to stderr. Reachability filtering resolves
 through `re_anchor` mappings, so a bridged conversation and its `continuation`
-lineage survive a squash merge instead of falling out of the picker. Turnbridge
+lineage survive a squash merge instead of falling out of the picker. Threadhop
 issues two such reads per invocation (conversation listing, then lineage
 lookup) and buffers the ledger's stderr notices across both so they render as
 one block above the picker rather than interleaving with it.
@@ -62,11 +62,11 @@ one block above the picker rather than interleaving with it.
 
 Bridging is a fork, not a move. Fabricating a target session writes a real
 native file; when the user continues there, the target CLI captures it as a
-new conversation whose id is the session id turnbridge generated (verified:
+new conversation whose id is the session id threadhop generated (verified:
 Codex resume preserves the id and appends). The source conversation still
 exists, so both are resumable — a genuine branch, like a git fork.
 
-To keep that honest instead of confusing, at fabricate time turnbridge appends
+To keep that honest instead of confusing, at fabricate time threadhop appends
 a `continuation` event (`links: [{rel:"continues", target:<source>}]`, content
 carries `imported_through_seq`) belonging to the target conversation. The
 picker reads these and labels rows in both directions (`→ bridged to Codex`,
@@ -75,7 +75,7 @@ embeds imported history is allowed but flagged. The default listing shows
 both branch endpoints — abandonment is not assumed. The same edge is what lets
 a downstream consumer (intent-recall) de-duplicate the copied prefix: target
 turns `0..imported_through_seq` are known copies of the source, not fresh
-evidence, so turnbridge does not need to alter capture to avoid double-count.
+evidence, so threadhop does not need to alter capture to avoid double-count.
 
 ## Fabrication contract (per target adapter)
 
@@ -85,7 +85,7 @@ one. Where a target's native records demand a particular shape — a resolvable
 provider id, a specific part structure — match that shape, and carry the
 source's identity somewhere that does not break resume. A bridged session that
 is unimpeachably honest and cannot be continued has failed at the only thing it
-exists to do. *(Corrected 2026-08-06, after `providerID: "turnbridge"` silently
+exists to do. *(Corrected 2026-08-06, after `providerID: "threadhop"` silently
 bricked continuation on every bridged opencode session — see the opencode notes
 below.)*
 
@@ -163,7 +163,7 @@ author with labels. Transport is optional-but-default-on: Conversation
 Ledger's auto-installed pre-push hook and fetch refspec ride normal
 `git push`/`git fetch`, gated by the ledger's secret scan and disableable per
 user (`{"transport": {"hook": false, "fetchRefspec": false}}`); `cledger sync`
-remains available for an explicit push/fetch/merge. Turnbridge adds no
+remains available for an explicit push/fetch/merge. Threadhop adds no
 network behavior of its own — it only reads whatever the ledger has already
 absorbed locally. Events captured before identity stamping existed are
 unattributed; a forced transcript rescan after the upgrade can duplicate
@@ -269,7 +269,7 @@ before broadening):
   replay happens, not what it's coerced into — unreadable/foreign reasoning
   is still folded into labeled text as before. On by default (decided
   2026-07-23); opt out with `--no-reasoning-replay` or
-  `{"reasoningReplay": false}` in `~/.turnbridge/config.json` (`src/config.ts`).
+  `{"reasoningReplay": false}` in `~/.threadhop/config.json` (`src/config.ts`).
   No ownership gate — replay applies to any synced conversation, not just
   the current user's own, per 2026-07-23 decision. The fabricated session's
   import notice (`buildRolloutLines`) is conditional: it discloses the
@@ -282,7 +282,7 @@ before broadening):
   different paid ChatGPT account (identical token accounting), so the
   ciphertext is not keyed per-account; the free tier cannot run Codex at all.
   Still open: blob TTL, and whether API-platform-org auth behaves the same
-  as ChatGPT auth — turnbridge attempts replay unconditionally either way
+  as ChatGPT auth — threadhop attempts replay unconditionally either way
   since auth mode isn't observable from here; a rejected blob at actual
   `codex resume` time has no proactive detection and falls under the same
   `--bootstrap` escape hatch as any other fabrication-drift failure.

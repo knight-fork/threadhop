@@ -8,10 +8,10 @@ import type { LaunchPlan } from "./targets/types.js";
 export async function runInteractiveLaunchPlan(plan: LaunchPlan): Promise<number> {
   if (!plan.initialInput) return runLaunchPlan(plan);
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stderr.write("turnbridge: this target needs an interactive terminal to submit its bootstrap prompt\n");
+    process.stderr.write("threadhop: this target needs an interactive terminal to submit its bootstrap prompt\n");
     return 1;
   }
-  for (const note of plan.notes) process.stderr.write(`turnbridge: ${note}\n`);
+  for (const note of plan.notes) process.stderr.write(`threadhop: ${note}\n`);
   const input = plan.initialInput;
   // Compile before spawning so a malformed adapter never leaves a native process behind.
   const readiness = new RegExp(input.readiness, "i");
@@ -20,7 +20,7 @@ export async function runInteractiveLaunchPlan(plan: LaunchPlan): Promise<number
     child = spawn(plan.command, plan.args, { cwd: plan.cwd, env: process.env as Record<string, string>,
       name: process.env.TERM ?? "xterm-256color", cols: process.stdout.columns || 120, rows: process.stdout.rows || 40 });
   } catch (error) {
-    process.stderr.write(`turnbridge: failed to launch ${plan.command}: ${String(error)}\n`);
+    process.stderr.write(`threadhop: failed to launch ${plan.command}: ${String(error)}\n`);
     return 1;
   }
   return new Promise(resolve => {
@@ -36,7 +36,7 @@ export async function runInteractiveLaunchPlan(plan: LaunchPlan): Promise<number
       // Once a person types, let them own the composer; do not race their input.
       // Folder trust happens before the composer. Forward that input without
       // cancelling the pending prompt; typing in the composer transfers ownership.
-      if (typing && !submitted && (pasted || readiness.test(stripVTControlCharacters(output)))) { submitted = true; clearTimeout(timer); clearTimeout(enterTimer); process.stderr.write(`\r\nturnbridge: bootstrap prompt was not submitted automatically; paste:\r\n${input.prompt}\r\n`); }
+      if (typing && !submitted && (pasted || readiness.test(stripVTControlCharacters(output)))) { submitted = true; clearTimeout(timer); clearTimeout(enterTimer); process.stderr.write(`\r\nthreadhop: bootstrap prompt was not submitted automatically; paste:\r\n${input.prompt}\r\n`); }
       child.write(text);
     };
     const resize = () => child.resize(process.stdout.columns || 120, process.stdout.rows || 40);
@@ -44,7 +44,7 @@ export async function runInteractiveLaunchPlan(plan: LaunchPlan): Promise<number
     const timer = setTimeout(() => {
       if (!submitted) {
         submitted = true;
-        process.stderr.write(`\r\nturnbridge: composer not detected; paste this prompt when ready:\r\n${input.prompt}\r\n`);
+        process.stderr.write(`\r\nthreadhop: composer not detected; paste this prompt when ready:\r\n${input.prompt}\r\n`);
       }
     }, 60_000);
     child.onData(data => {

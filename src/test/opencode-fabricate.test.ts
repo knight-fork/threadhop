@@ -60,7 +60,7 @@ function blockDraft(conversationId: string, seq: number, role: string, blocks: u
         ? { type: "human" as const, id: "me@x.com" }
         : { type: "agent" as const, id: "claude-test" },
     producer: {
-      tool: "turnbridge-test",
+      tool: "threadhop-test",
       source: "claude-code",
       session_id: SID,
       ...(role === "user" ? {} : { model: "claude-test", provider: "anthropic" }),
@@ -121,7 +121,7 @@ test("builds a session envelope opencode's importer accepts", async () => {
     assert.equal(payload.info["projectID"], "abc123project");
     // opencode's own version, as a native session would carry
     assert.equal(payload.info["version"], "1.18.5");
-    // titled by the conversation, not by turnbridge's import notice
+    // titled by the conversation, not by threadhop's import notice
     assert.equal(payload.info["title"], "add a retry to the fetcher (from Claude Code)");
 
     // notice + two turns, every part stamped with its own message and session
@@ -351,8 +351,8 @@ test("thinking replays as a reasoning part, and folds to labeled text when repla
   }
 });
 
-test("the session dispatches with a provider opencode can resolve, never turnbridge's own", async () => {
-  // Regression: this asserted providerID === "turnbridge" — an id no opencode
+test("the session dispatches with a provider opencode can resolve, never threadhop's own", async () => {
+  // Regression: this asserted providerID === "threadhop" — an id no opencode
   // install can resolve. The agent loop resolves its model from what the
   // session stores (not from `-m`, not from the TUI picker), so it threw
   // ProviderModelNotFoundError and exited before issuing a request: history
@@ -367,7 +367,7 @@ test("the session dispatches with a provider opencode can resolve, never turnbri
     assert.equal(assistant.info["modelID"], "deepseek-v4-flash");
     assert.deepEqual(payload.info["model"], { id: "deepseek-v4-flash", providerID: "ds4" });
     for (const message of payload.messages) {
-      assert.notEqual(message.info["providerID"], "turnbridge");
+      assert.notEqual(message.info["providerID"], "threadhop");
     }
   } finally {
     await cleanup();

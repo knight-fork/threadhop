@@ -14,7 +14,7 @@ test("local canaries require explicit loopback model/protocol and bounded budget
 
 test("paid canaries require explicit credentials, pricing and estimated spend reservation", () => {
   const config: LocalModelConfig = { tier: "usual-provider", endpoint: "https://provider.example.invalid", model: "explicit-model", protocol: "responses",
-    apiKeyEnv: "TURNBRIDGE_VERIFY_PROVIDER_API_KEY", budgetUsd: 0.1, inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 2, maxOutputTokens: 128 };
+    apiKeyEnv: "THREADHOP_VERIFY_PROVIDER_API_KEY", budgetUsd: 0.1, inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 2, maxOutputTokens: 128 };
   validateInferenceProvider(config);
   assert.throws(() => validateLocalModel(config), /cannot enable a paid provider/);
   const { budgetUsd, ...withoutBudget } = config;

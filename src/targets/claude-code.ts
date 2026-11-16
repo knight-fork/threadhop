@@ -142,7 +142,7 @@ function convertBlocks(
  * Verified by scripts/probe-picker.mjs: the picker titles a session by its
  * `ai-title` line, falling back to the first user message when there is none.
  * Fabricated sessions had no such line, so every bridged conversation showed
- * up in the picker titled by turnbridge's own import notice — identical for
+ * up in the picker titled by threadhop's own import notice — identical for
  * every bridge, and describing the machinery rather than the conversation.
  * Naming it after the first thing the human actually said is both more useful
  * and closer to what the title would have been natively.
@@ -189,7 +189,7 @@ export function buildSessionLines(
         {
           type: "text",
           text:
-            `[turnbridge import notice] This conversation was imported from ${importSourceLabel(summary)}. ` +
+            `[threadhop import notice] This conversation was imported from ${importSourceLabel(summary)}. ` +
             "The history below is the literal visible transcript; hidden reasoning and provider-private " +
             "state were not transferred, and historical tool calls are context only.",
         },
@@ -235,7 +235,7 @@ export function buildSessionLines(
       spec.type === "assistant"
         ? {
             // full envelope: defends against stricter validation in other versions
-            model: spec.model ?? "turnbridge-import",
+            model: spec.model ?? "threadhop-import",
             id: `msg_tb_${uuid.slice(0, 8)}`,
             type: "message",
             role: "assistant",
@@ -284,11 +284,11 @@ async function readExisting(path: string): Promise<string | null> {
  * chain, and they hold the user's state (permission mode, cost), so they are
  * kept rather than rewritten away.
  *
- * Chain lines — anything with a `uuid` — must all be turnbridge's, in order,
+ * Chain lines — anything with a `uuid` — must all be threadhop's, in order,
  * a prefix of what it would write now (uuids derive from the session id and
  * source events, so the prefix holds while the source only grows). Then the
  * update is simply appending the rest: their parentUuids already continue
- * from the last existing line. A chain line turnbridge did not write means
+ * from the last existing line. A chain line threadhop did not write means
  * the session was continued after resuming, which is divergence: refusing is
  * recoverable, overwriting a user's turns is not.
  */
@@ -313,7 +313,7 @@ export function planSessionAppend(
     }
     if (typeof line.uuid !== "string") continue;
     if (matched >= ours.length || line.uuid !== ours[matched]!.uuid) {
-      return { reason: "has conversation lines turnbridge did not write (was it continued after resuming?)" };
+      return { reason: "has conversation lines threadhop did not write (was it continued after resuming?)" };
     }
     matched++;
   }

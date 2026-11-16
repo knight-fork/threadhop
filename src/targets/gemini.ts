@@ -12,7 +12,7 @@ import { importSourceLabel, type ConversationSummary } from "../types.js";
 export function buildGeminiImport(summary: ConversationSummary, sessionId: string, cwd: string, now = new Date()) {
   const timestamp = now.toISOString();
   const turns = foldedTurns(summary);
-  const notice = { role: "user" as const, text: `[turnbridge import notice] Visible conversation imported from ${importSourceLabel(summary)}. Foreign tools, thinking and attachment references are labeled historical text. Hidden state was not transferred.`, timestamp };
+  const notice = { role: "user" as const, text: `[threadhop import notice] Visible conversation imported from ${importSourceLabel(summary)}. Foreign tools, thinking and attachment references are labeled historical text. Hidden state was not transferred.`, timestamp };
   return {
     lines: [
       { sessionId, projectHash: createHash("sha256").update(cwd).digest("hex"), startTime: timestamp, lastUpdated: timestamp, kind: "main" },

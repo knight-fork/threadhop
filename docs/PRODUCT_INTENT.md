@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Turnbridge lets a developer continue a visible coding conversation in a
+Threadhop lets a developer continue a visible coding conversation in a
 different agent CLI when they choose to switch providers or tools. It retains
 the full user-visible turn history—messages, tool calls, and tool results—
 rather than requiring a last-minute summary from a rate-limited model.
@@ -44,13 +44,13 @@ unless you ask for everyone's.
 
 - A team presence system, task tracker, or agent orchestration framework.
 - Inferring or replacing human intent.
-- Summarized "handoff notes" (sticky-note-style); Turnbridge moves the literal
+- Summarized "handoff notes" (sticky-note-style); Threadhop moves the literal
   record.
 
 ## Relationship to Conversation Ledger
 
-Turnbridge is a client of Conversation Ledger, which owns the durable neutral
+Threadhop is a client of Conversation Ledger, which owns the durable neutral
 record **and** the source-CLI capture adapters (hooks, transcript parsers,
-cursors, dedup). Turnbridge owns everything on the resume side: the unified
+cursors, dedup). Threadhop owns everything on the resume side: the unified
 picker, ownership/compatibility filtering, target-CLI session fabrication,
 bootstrap rehydration, and the optional command shims.

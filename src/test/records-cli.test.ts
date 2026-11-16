@@ -20,7 +20,7 @@ function run(cwd: string, args: string[]) {
 }
 
 test("records CLI uses cledger's exact namespace and does not add transport wiring", async () => {
-  const repo = await makeTempRepo("turnbridge-records-namespace-");
+  const repo = await makeTempRepo("threadhop-records-namespace-");
   try {
     const ledger = asLedger(repo);
     assert.equal(ledger.ns.name, "conversation-ledger");
@@ -41,16 +41,16 @@ test("records CLI uses cledger's exact namespace and does not add transport wiri
       targetCli: "codex",
       version: "test",
     });
-    const events = await readEvents(repo, { kind: "continuation", tool: "turnbridge" });
+    const events = await readEvents(repo, { kind: "continuation", tool: "threadhop" });
     assert.equal(events.length, 1);
     const refsBefore = await git(["for-each-ref", "--format=%(refname)", "refs/notes"], { cwd: repo.root });
     const hookPath = join(repo.commonDir, "hooks", "pre-push");
     const hookBefore = await readFile(hookPath, "utf8");
     const fetchBefore = await git(["config", "--get-all", "remote.origin.fetch"], { cwd: repo.root });
     assert.match(hookBefore, /cledger.*transport-push|conversation-ledger\/dist\/cli\.js/);
-    // Checkout directories may themselves contain "turnbridge" (as on GitHub
-    // runners). Reject Turnbridge transport invocations, not those paths.
-    assert.doesNotMatch(hookBefore, /(?:^|[\s"/])(?:turnbridge|tb)(?:["\s]+)transport-push|turnbridge\/dist\/cli\.js/);
+    // Checkout directories may themselves contain "threadhop" (as on GitHub
+    // runners). Reject Threadhop transport invocations, not those paths.
+    assert.doesNotMatch(hookBefore, /(?:^|[\s"/])(?:threadhop|thop)(?:["\s]+)transport-push|threadhop\/dist\/cli\.js/);
     assert.match(fetchBefore, /refs\/notes\/conversation-ledger:refs\/notes\/cledger-incoming/);
 
     assert.equal(run(repo.root, ["records", "--help"]).status, 0);
@@ -69,11 +69,11 @@ test("records CLI uses cledger's exact namespace and does not add transport wiri
 });
 
 test("canonical records commands and aliases share routing, output, and exit codes", async () => {
-  const repo = await makeTempRepo("turnbridge-records-routing-");
+  const repo = await makeTempRepo("threadhop-records-routing-");
   try {
     const help = run(repo.root, ["records", "--help"]);
     assert.equal(help.status, 0);
-    assert.match(help.stdout, /^usage: turnbridge records <command>/);
+    assert.match(help.stdout, /^usage: threadhop records <command>/);
     const cases: Array<[string, string, string[]]> = [
       ["sync", "sync", ["--fetch-only", "--push-only"]],
       ["review", "review", []],
@@ -97,7 +97,7 @@ test("canonical records commands and aliases share routing, output, and exit cod
     }
     const unknown = run(repo.root, ["records", "bogus"]);
     assert.equal(unknown.status, 2);
-    assert.match(unknown.stderr, /^turnbridge records: unknown records command/);
+    assert.match(unknown.stderr, /^threadhop records: unknown records command/);
     assert.equal(run(repo.root, ["records", "sync", "--bad-option"]).status, 2);
   } finally {
     await cleanupRepo(repo);
@@ -105,7 +105,7 @@ test("canonical records commands and aliases share routing, output, and exit cod
 });
 
 test("agent-only safety refusals preserve runtime exit code", async () => {
-  const repo = await makeTempRepo("turnbridge-records-safety-");
+  const repo = await makeTempRepo("threadhop-records-safety-");
   try {
     const blocked = run(repo.root, ["records", "sync", "--no-scan", "--push-only"]);
     assert.equal(blocked.status, 1);

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 /**
- * Fixed namespace for turnbridge's name-based ids. Changing it changes every
+ * Fixed namespace for threadhop's name-based ids. Changing it changes every
  * id a fabricator derives, which would make previously written sessions look
  * diverged to an in-place update, so treat it as frozen.
  */

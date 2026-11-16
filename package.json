@@ -1,20 +1,23 @@
 {
-  "name": "turnbridge",
+  "name": "threadhop",
   "version": "0.6.1",
   "description": "Lossless visible-conversation continuity between coding agent CLIs.",
   "type": "module",
   "license": "MIT",
-  "author": "evintunador",
+  "author": "knight-fork",
+  "contributors": [
+    "Evin Tunador (original turnbridge author, https://github.com/evintunador/turnbridge)"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/evintunador/turnbridge"
+    "url": "https://github.com/knight-fork/threadhop"
   },
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "turnbridge": "dist/cli.js",
-    "tb": "dist/cli.js"
+    "threadhop": "dist/cli.js",
+    "thop": "dist/cli.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

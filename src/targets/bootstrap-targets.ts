@@ -38,9 +38,9 @@ function wrap(name: CliName, binary: string, args: string[], cwd: string, notes:
   const syntax = BOOTSTRAP_SYNTAX[name]!;
   if (name === "aider") {
     // Python selection is explicit: pipx/venv Aider need their own interpreter.
-    const python = process.env.TURNBRIDGE_AIDER_PYTHON;
+    const python = process.env.THREADHOP_AIDER_PYTHON;
     return { command: "cledger", args: ["run", "aider", ...(python ? ["--python", python] : []), "--", ...args], cwd,
-      notes: [...notes, "Aider capture uses cledger's recorder; set TURNBRIDGE_AIDER_PYTHON to the Python environment containing aider-chat"] };
+      notes: [...notes, "Aider capture uses cledger's recorder; set THREADHOP_AIDER_PYTHON to the Python environment containing aider-chat"] };
   }
   if (syntax.wrapper) return { command: "cledger", args: ["run", syntax.wrapper, "--binary", binary, "--", ...args], cwd, notes };
   return { command: binary, args, cwd, notes };
@@ -53,7 +53,7 @@ export function bootstrapTarget(name: CliName): TargetAdapter {
   return {
     name, binary, supportsNativeResume: !!syntax.resume, supportsNativeImport: false,
     async isInstalled() {
-      if (name === "aider" && process.env.TURNBRIDGE_AIDER_PYTHON) return (await binaryOnPath(process.env.TURNBRIDGE_AIDER_PYTHON)) && (await binaryOnPath("cledger"));
+      if (name === "aider" && process.env.THREADHOP_AIDER_PYTHON) return (await binaryOnPath(process.env.THREADHOP_AIDER_PYTHON)) && (await binaryOnPath("cledger"));
       return (await binaryOnPath(binary)) && (!(syntax.wrapper || name === "aider") || await binaryOnPath("cledger"));
     },
     nativeResume(id, cwd) {

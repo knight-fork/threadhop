@@ -12,10 +12,10 @@ import { listConversations, targetFor } from "../dist/index.js";
 
 const MARKER = `TB-PROBE-${Math.random().toString(36).slice(2, 8)}`;
 
-const dir = await mkdtemp(join(tmpdir(), "turnbridge-probe-"));
+const dir = await mkdtemp(join(tmpdir(), "threadhop-probe-"));
 await git(["init", "-q", "-b", "main"], { cwd: dir });
-await git(["config", "user.email", "smoke@turnbridge.test"], { cwd: dir });
-await git(["config", "user.name", "Turnbridge Smoke"], { cwd: dir });
+await git(["config", "user.email", "smoke@threadhop.test"], { cwd: dir });
+await git(["config", "user.name", "Threadhop Smoke"], { cwd: dir });
 await git(["config", "commit.gpgsign", "false"], { cwd: dir });
 await writeFile(join(dir, "README.md"), "probe\n");
 await git(["add", "."], { cwd: dir });
@@ -26,8 +26,8 @@ const conversationId = `claude-code:${crypto.randomUUID()}`;
 const turn = (role, text, seq) => ({
   kind: "conversation_turn",
   occurred_at: `2026-01-01T00:00:0${seq}.000Z`,
-  actor: role === "user" ? { type: "human", id: "smoke@turnbridge.test" } : { type: "agent", id: "probe-model" },
-  producer: { tool: "turnbridge-smoke", source: "claude-code", session_id: conversationId.split(":")[1] },
+  actor: role === "user" ? { type: "human", id: "smoke@threadhop.test" } : { type: "agent", id: "probe-model" },
+  producer: { tool: "threadhop-smoke", source: "claude-code", session_id: conversationId.split(":")[1] },
   conversation: { id: conversationId, seq },
   content: { role, blocks: [{ type: "text", text }] },
 });

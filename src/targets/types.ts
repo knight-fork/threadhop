@@ -48,7 +48,7 @@ export interface TargetAdapter {
    * `existingSessionId`, on adapters with `supportsUpdateInPlace`, rewrites
    * that previously fabricated session instead of creating a new one, and
    * throws MirrorDivergedError (leaving the file untouched) when the session
-   * holds anything turnbridge would not write itself, such as turns the user
+   * holds anything threadhop would not write itself, such as turns the user
    * added after resuming it.
    */
   fabricate(
@@ -67,7 +67,7 @@ export interface FabricateOptions {
 }
 
 /**
- * The session asked to be updated in place has content turnbridge did not
+ * The session asked to be updated in place has content threadhop did not
  * write, so rewriting it would destroy that content. Callers fall back to a
  * new session; this is not a format failure and must not trigger bootstrap.
  */

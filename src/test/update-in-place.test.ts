@@ -45,9 +45,9 @@ interface Sandbox {
  */
 async function withSandbox(fn: (box: Sandbox) => Promise<void>): Promise<void> {
   const repo = await makeTempRepo();
-  const binDir = await mkdtemp(join(tmpdir(), "turnbridge-uip-bin-"));
-  const claudeDir = await mkdtemp(join(tmpdir(), "turnbridge-uip-claude-"));
-  const codexHome = await mkdtemp(join(tmpdir(), "turnbridge-uip-codex-"));
+  const binDir = await mkdtemp(join(tmpdir(), "threadhop-uip-bin-"));
+  const claudeDir = await mkdtemp(join(tmpdir(), "threadhop-uip-claude-"));
+  const codexHome = await mkdtemp(join(tmpdir(), "threadhop-uip-codex-"));
   for (const [name, version] of [["claude", "2.1.316 (Claude Code)"], ["codex", "codex-cli 0.146.0"]]) {
     const path = join(binDir, name!);
     await writeFile(path, `#!/bin/sh\necho "${version}"\n`);
@@ -157,7 +157,7 @@ test("claude: a grown source appends only the new chain lines", async () => {
   });
 });
 
-test("claude: divergence means a chain line turnbridge did not write", async () => {
+test("claude: divergence means a chain line threadhop did not write", async () => {
   await withSandbox(async (box) => {
     const sid = "44444444-4444-4444-8444-444444444444";
     const lines = buildSessionLines(await box.summary(), sid, CWD, "2.1.316", NOW);

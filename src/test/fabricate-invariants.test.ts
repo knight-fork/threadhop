@@ -8,7 +8,7 @@ import { turnDraft } from "./helpers.js";
 
 /**
  * Invariants the format specs call out as "untested — recommend always doing
- * X" (docs/specs/claude-session-format.md §7). turnbridge already satisfies
+ * X" (docs/specs/claude-session-format.md §7). threadhop already satisfies
  * them by construction; these lock that in so a refactor can't quietly
  * regress into the undefined-behavior territory the specs warn about.
  */
@@ -89,7 +89,7 @@ test("codex: every line carries a millisecond-precision UTC timestamp", () => {
 test("claude: history lines preserve source order and never reorder real events", () => {
   const lines = buildSessionLines(SAMPLE, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "/repo", "2.1.215", NOW);
   const convo = conversationLines(lines);
-  // line 0 is turnbridge's synthetic import notice, stamped at fabrication
+  // line 0 is threadhop's synthetic import notice, stamped at fabrication
   // time; see the comment in buildSessionLines about why it is not backdated.
   const history = convo.slice(1).map((l) => l.timestamp);
   assert.ok(isNonDecreasing(history), `history went backward: ${history.join(", ")}`);
@@ -129,8 +129,8 @@ test("claude: picker title names the conversation, not the import notice", () =>
   const title = lines.find((l) => l.type === "ai-title") as { aiTitle: string } | undefined;
   assert.ok(title);
   // the picker falls back to the first user message when no ai-title exists,
-  // and that message is turnbridge's own notice — identical for every bridge
-  assert.doesNotMatch(title!.aiTitle, /turnbridge import notice/);
+  // and that message is threadhop's own notice — identical for every bridge
+  assert.doesNotMatch(title!.aiTitle, /threadhop import notice/);
   assert.match(title!.aiTitle, /^first question \(from Codex\)$/);
 });
 

@@ -1,10 +1,15 @@
-# Turnbridge
+# Threadhop
 
 Lossless visible-conversation continuity between coding agent CLIs.
 
+> Threadhop is an independent continuation of
+> [evintunador/turnbridge](https://github.com/evintunador/turnbridge) by Evin
+> Tunador, used under the MIT License. Thanks to the original project for the
+> foundation this builds on.
+
 [Conversation Ledger](https://github.com/evintunador/conversation-ledger)
 captures native local transcripts across its twenty-CLI roster incrementally into git
-notes. Turnbridge is the resume layer on top: one picker across CLIs, honest
+notes. Threadhop is the resume layer on top: one picker across CLIs, honest
 session typing, and rehydration of a conversation into a *different* CLI —
 without claiming to transfer hidden reasoning or provider-private state, except
 where it's verifiably real: a Codex-origin conversation fabricated back into
@@ -19,15 +24,15 @@ exactly that whenever it happens.
 cledger install all
 
 # pick a conversation from this repo's history and resume it anywhere
-turnbridge resume            # interactive: choose conversation, then target CLI
-turnbridge resume codex      # resume straight into Codex
-turnbridge resume claude     # resume straight into Claude Code
-turnbridge resume opencode   # resume straight into opencode
-turnbridge resume qwen       # native visible-text import where format supported
-turnbridge resume gemini     # transcript bootstrap
-turnbridge targets           # list implemented routes for all twenty targets
-turnbridge list              # print compatible conversations
-turnbridge records --help    # shared cledger records maintenance commands
+threadhop resume            # interactive: choose conversation, then target CLI
+threadhop resume codex      # resume straight into Codex
+threadhop resume claude     # resume straight into Claude Code
+threadhop resume opencode   # resume straight into opencode
+threadhop resume qwen       # native visible-text import where format supported
+threadhop resume gemini     # transcript bootstrap
+threadhop targets           # list implemented routes for all twenty targets
+threadhop list              # print compatible conversations
+threadhop records --help    # shared cledger records maintenance commands
 
 # options
 #   --all                   include collaborators' conversations
@@ -36,18 +41,18 @@ turnbridge records --help    # shared cledger records maintenance commands
 #   --no-reasoning-replay   don't replay Codex-origin encrypted reasoning blobs
 
 # optional: make bare `claude --resume` / `codex resume` open the merged picker
-turnbridge shim install
+threadhop shim install
 ```
 
-`turnbridge records <command>` operates on the **shared cledger conversation
-records** at `refs/notes/conversation-ledger`, including turnbridge's
-continuation events. It uses cledger's exact Ledger factory; turnbridge has no
+`threadhop records <command>` operates on the **shared cledger conversation
+records** at `refs/notes/conversation-ledger`, including threadhop's
+continuation events. It uses cledger's exact Ledger factory; threadhop has no
 separate notes ref, profile, transport hook, or `transport-push` entrypoint.
 `cledger` owns capture, hook installation (`cledger install all`), and notes
-transport. For example, `turnbridge records sync --fetch-only` fetches the
-shared records. `turnbridge records review`, `inspect`, `redact`, `allow`, and
+transport. For example, `threadhop records sync --fetch-only` fetches the
+shared records. `threadhop records review`, `inspect`, `redact`, `allow`, and
 manual `reanchor` are human-only operations; run them yourself in a plain
-terminal. `turnbridge sync`, `review`, `inspect`, `redact`, `allow`, and
+terminal. `threadhop sync`, `review`, `inspect`, `redact`, `allow`, and
 `reanchor` are shortcuts to the same records dispatcher.
 
 For standalone annals maintenance, register cledger's existing namespace once:
@@ -65,7 +70,7 @@ annals profile add conversation-ledger \
 
 Same-CLI selections use exact native resume when implemented; Aider and Continue use transcript bootstrap because their current adapters cannot select an exact native session ID. Cross-CLI selections write a
 target-native session file and hand off to the target's own resume; when that
-is unsupported for the installed CLI version, turnbridge falls back to a fresh
+is unsupported for the installed CLI version, threadhop falls back to a fresh
 session bootstrapped with the literal transcript.
 
 opencode works in both directions as of conversation-ledger 0.18.0, which
@@ -73,9 +78,9 @@ captures it via a `session.idle` plugin rather than a shell hook. Two things
 differ from the other CLIs in practice. Its sessions live in one shared SQLite
 DB rather than per-session files, so fabrication goes through `opencode
 import`, and a bridged session is filed under the current directory's opencode
-project (turnbridge looks that up; if the directory isn't a registered opencode
+project (threadhop looks that up; if the directory isn't a registered opencode
 project the session lands in the `global` one and is listed everywhere). And
-`turnbridge shim install` writes no opencode shim — opencode has no bare
+`threadhop shim install` writes no opencode shim — opencode has no bare
 "open my sessions" command to intercept, since `-s` always takes an id.
 When the source model isn't one opencode can run, the bridged session uses
 the model opencode would start a new session with (your configured `model`,
@@ -83,7 +88,7 @@ including `OPENCODE_CONFIG_CONTENT`), and the import notice says so.
 
 Bridging into opencode right after an opencode session ends can fail with
 `database is locked`: all opencode processes share one SQLite database, and
-cledger is still capturing the session that just ended. turnbridge then
+cledger is still capturing the session that just ended. threadhop then
 falls back to a bootstrap session. Wait a few seconds and re-run to get a
 native one. See [the opencode spec](docs/specs/opencode-session-format.md),
 §8.
@@ -92,7 +97,7 @@ native one. See [the opencode spec](docs/specs/opencode-session-format.md),
 
 Codex's `reasoning` response_items carry ciphertext only OpenAI's servers can
 decrypt; conversation-ledger preserves it losslessly and opaquely (0.10.0+).
-When fabricating a Codex-origin conversation back into Codex, turnbridge
+When fabricating a Codex-origin conversation back into Codex, threadhop
 replays those blobs verbatim by default, which can restore hidden reasoning
 provider-side (verified same-account and cross-account: see
 conversation-ledger's roadmap). Replay is gated per-event on the reasoning
@@ -104,7 +109,7 @@ replayed; the rest of the conversation is still the literal folded-text
 transcript, same as always.
 
 Opt out with `--no-reasoning-replay`, or persistently via
-`{"reasoningReplay": false}` in `~/.turnbridge/config.json`.
+`{"reasoningReplay": false}` in `~/.threadhop/config.json`.
 
 See [product intent](docs/PRODUCT_INTENT.md), the
 [roadmap](docs/ROADMAP.md), and the
@@ -126,9 +131,9 @@ from installed certification: authentication blockers, native runtime failures,
 and untested versions remain visible in the reports.
 
 ```sh
-npm run verify:installed -- --cledger /clean/cledger/dist/cli.js --only codex,opencode --mode native-import --output /tmp/tb-evidence
-npm run verify:program -- --cledger /clean/cledger/dist/cli.js --runtime-dir /tmp/pinned-clis --output /tmp/tb-matrix
-npm run verify:report -- /tmp/tb-matrix/evidence.json
+npm run verify:installed -- --cledger /clean/cledger/dist/cli.js --only codex,opencode --mode native-import --output /tmp/thop-evidence
+npm run verify:program -- --cledger /clean/cledger/dist/cli.js --runtime-dir /tmp/pinned-clis --output /tmp/thop-matrix
+npm run verify:report -- /tmp/thop-matrix/evidence.json
 ```
 
 Tests use disposable profiles, a bounded local scripted provider, real installed
@@ -145,7 +150,7 @@ Optional `maxRequests`, `maxOutputTokens` and `timeoutMs` bound the canary.
 Each CLI keeps its native protocol; incompatible configurations fail explicitly.
 Paid canaries require `--provider-config` with `tier: "usual-provider"`, HTTPS
 endpoint, protocol/model, `budgetUsd`, explicit `inputUsdPerMillionTokens` and
-`outputUsdPerMillionTokens`, and `apiKeyEnv: "TURNBRIDGE_VERIFY_PROVIDER_API_KEY"`.
+`outputUsdPerMillionTokens`, and `apiKeyEnv: "THREADHOP_VERIFY_PROVIDER_API_KEY"`.
 Set that dedicated environment variable yourself; ordinary account credentials
 are never inherited. Requests reserve a conservative text/token estimate before
 inference and reject multimodal inputs. Supplied prices determine the estimate;

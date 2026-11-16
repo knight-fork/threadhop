@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CliName } from "./types.js";
 
-export interface TurnbridgeConfig {
-  /** Target CLI used when `turnbridge resume` is called without one. */
+export interface ThreadhopConfig {
+  /** Target CLI used when `threadhop resume` is called without one. */
   defaultTarget?: CliName;
   /**
    * Replay a Codex-origin conversation's opaque `reasoning` blobs when
@@ -15,24 +15,24 @@ export interface TurnbridgeConfig {
 }
 
 export function configDir(): string {
-  return process.env["TURNBRIDGE_HOME"] ?? join(homedir(), ".turnbridge");
+  return process.env["THREADHOP_HOME"] ?? join(homedir(), ".threadhop");
 }
 
 function configPath(): string {
   return join(configDir(), "config.json");
 }
 
-export async function loadConfig(): Promise<TurnbridgeConfig> {
+export async function loadConfig(): Promise<ThreadhopConfig> {
   try {
     const raw = await readFile(configPath(), "utf8");
-    const data = JSON.parse(raw) as TurnbridgeConfig;
+    const data = JSON.parse(raw) as ThreadhopConfig;
     return data && typeof data === "object" ? data : {};
   } catch {
     return {};
   }
 }
 
-export async function saveConfig(config: TurnbridgeConfig): Promise<void> {
+export async function saveConfig(config: ThreadhopConfig): Promise<void> {
   await mkdir(configDir(), { recursive: true });
   await writeFile(configPath(), JSON.stringify(config, null, 2) + "\n");
 }

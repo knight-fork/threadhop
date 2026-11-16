@@ -10,8 +10,8 @@ import { providerText } from "./provider-text.js";
  */
 export async function startBridgeProvider(cli: CliName, historyMarker: string, local?: LocalModelConfig) {
   if (local) validateInferenceProvider(local);
-  const dedicatedKey = process.env.TURNBRIDGE_VERIFY_PROVIDER_API_KEY;
-  delete process.env.TURNBRIDGE_VERIFY_PROVIDER_API_KEY;
+  const dedicatedKey = process.env.THREADHOP_VERIFY_PROVIDER_API_KEY;
+  delete process.env.THREADHOP_VERIFY_PROVIDER_API_KEY;
   const runId = randomUUID();
   let transcriptLine = 1, transcriptLines = 0;
   const state = { requests: 0, reservedUsd: 0, completedSecrets: [] as string[], modelContext: false, contexts: [] as boolean[], bodies: [] as unknown[], errors: [] as string[], secret: "", transcriptPath: "", evidencePath: "evidence.txt" };
@@ -57,7 +57,7 @@ export async function startBridgeProvider(cli: CliName, historyMarker: string, l
       }));
       const foundSecret = state.secret && results.includes(state.secret);
       const auxiliary = !data.tools?.length;
-      const answer = cli === "aider" && hasHistory && context.includes(state.secret) ? `TB_DONE ${historyMarker} ${state.secret}` : auxiliary ? "Turnbridge test session" : foundSecret && hasHistory ? `TB_DONE ${historyMarker} ${state.secret}` : undefined;
+      const answer = cli === "aider" && hasHistory && context.includes(state.secret) ? `TB_DONE ${historyMarker} ${state.secret}` : auxiliary ? "Threadhop test session" : foundSecret && hasHistory ? `TB_DONE ${historyMarker} ${state.secret}` : undefined;
       if (answer?.includes(state.secret) && answer.includes("TB_DONE")) state.completedSecrets.push(state.secret);
       let path = !hasHistory && state.transcriptPath ? state.transcriptPath : state.evidencePath;
       const tools = (data.tools ?? []).flatMap((tool: any) => tool.functionDeclarations ?? tool.tools ?? [tool.function ?? tool]);

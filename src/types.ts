@@ -34,7 +34,7 @@ export interface ConversationSummary {
   /** Distinct human actor ids (git emails); empty when captured pre-identity. */
   owners: string[];
   ownerDisplays: string[];
-  /** Root-to-selected CLI path when turnbridge reconstructed multi-hop history. */
+  /** Root-to-selected CLI path when threadhop reconstructed multi-hop history. */
   lineageSources?: string[];
   /** Unique pending-bootstrap correlation, set by the resume planner. */
   bootstrapToken?: string;
@@ -54,7 +54,7 @@ export function importSourceLabel(summary: ConversationSummary): string {
   return sources.map(cliLabel).join(" → ");
 }
 
-/** One normalized content block inside a turn (subset turnbridge consumes). */
+/** One normalized content block inside a turn (subset threadhop consumes). */
 export interface TurnBlock {
   type?: string;
   text?: string;

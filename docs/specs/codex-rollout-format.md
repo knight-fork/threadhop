@@ -1,6 +1,6 @@
 # Codex CLI native "rollout" session file format — reverse-engineering spec
 
-Purpose: enable `turnbridge` to FABRICATE a `~/.codex/sessions/.../rollout-*.jsonl` file that
+Purpose: enable `threadhop` to FABRICATE a `~/.codex/sessions/.../rollout-*.jsonl` file that
 Codex's native `resume` (both interactive TUI and `codex exec resume`) will load with the
 fabricated prior conversation visible to the model.
 
@@ -61,7 +61,7 @@ codex exec resume [SESSION_ID] [PROMPT] [OPTIONS]
   invoked `codex exec resume` from `/tmp` instead, and asked the agent to run `pwd` — it printed
   `/tmp`. So `session_meta.cwd` is effectively cosmetic/display metadata (used for the picker's
   cwd filter and any UI that shows "resumed session in <dir>"), not authoritative for execution.
-  Implication for turnbridge: set `cwd` to whatever you want *displayed*/matched by the picker,
+  Implication for threadhop: set `cwd` to whatever you want *displayed*/matched by the picker,
   but don't rely on it to sandbox or root the resumed agent — that's controlled by the real
   invocation cwd / `-C`/`--cd`.
 
@@ -233,7 +233,7 @@ Appears when Codex auto-compacts long history. Shape:
 ```
 {message: "", replacement_history: [ <array of response_item-shaped message objects that replace the earlier raw history> ]}
 ```
-Not needed for fabrication of a short session; relevant only if turnbridge wants to fabricate a
+Not needed for fabrication of a short session; relevant only if threadhop wants to fabricate a
 session that *looks like* it went through compaction (e.g. to hide raw tool noise while keeping
 a condensed summary). `replacement_history` entries are plain `message` items with the same
 shape as §4.3, so this is really just "inject condensed message items and mark them as a
@@ -245,7 +245,7 @@ compaction event" — low risk to fabricate the same way as regular messages if 
 
 > **Superseded in part — see §5.1.** The recommendation below was written when
 > `function_call` replay was an untested risk. It has since been tested and is safe for
-> *paired* calls, which turnbridge now emits. The reasoning is kept because it still
+> *paired* calls, which threadhop now emits. The reasoning is kept because it still
 > explains the unpaired and `custom_tool_call` cases, which remain text-folded.
 
 **Original recommendation: fold foreign tool calls into plain `message` content
@@ -280,7 +280,7 @@ Reasoning:
   Codex-authored `response_item.message.content` (`input_text`/`output_text` are the only two
   observed). Prefer the plain-text-folding approach unless/until `tool_use` blocks are
   separately verified against a live Codex install.
-- For turnbridge's stated goal (make the resumed agent aware of what happened, not literally
+- For threadhop's stated goal (make the resumed agent aware of what happened, not literally
   re-execute historical tool calls), folding into message text is strictly sufficient — verified
   by our experiment — and avoids every open question about tool-schema/call_id validation.
 
@@ -300,7 +300,7 @@ Codex, three fabricated histories:
 So a foreign tool name is *not* rejected, and `call_id` is not validated against anything the
 backend knows. What matters is pairing.
 
-turnbridge therefore emits, for the Codex target:
+threadhop therefore emits, for the Codex target:
 
 - a `tool_use` block → `function_call` response_item, `name` verbatim, `call_id` = the source
   tool-use id, `arguments` as a **JSON string** (not an object — the Responses API requires it);
@@ -312,7 +312,7 @@ turnbridge therefore emits, for the Codex target:
 
 Codex has no generic tool-call `event_msg` type (only tool-specific ones like `patch_apply_end`),
 so a `function_call` alone is invisible in TUI scrollback. Since `event_msg` is display-only and
-`response_item` is what the model reads, turnbridge writes both: the structured item for the
+`response_item` is what the model reads, threadhop writes both: the structured item for the
 model and an `agent_message` twin for the human. Neither duplicates the other in model context.
 
 Historical tool calls are context, never re-executed.
@@ -341,7 +341,7 @@ Its Codex writer path corroborates the core `session_meta` shape we found indepe
 (`id`, `session_id`, `cwd`, `timestamp`, `originator`, `cli_version`, `source`, `thread_source`,
 `model_provider`) and confirms `response_item` uses `output_text`/`input_text` content blocks
 keyed on role. It diverges from our verified-safe approach in two ways worth flagging as
-**unverified-against-live-Codex** if turnbridge borrows from it directly:
+**unverified-against-live-Codex** if threadhop borrows from it directly:
 1. It emits some user messages as `event_msg` (`user_message`/`agent_reasoning`) instead of
    `response_item` — per our findings, `event_msg` is NOT required for context replay and,
    more importantly, we have no evidence it's *sufficient* on its own (we never tested a
@@ -367,7 +367,7 @@ keyed on role. It diverges from our verified-safe approach in two ways worth fla
    `function_call_output` pair whose `name` is a tool Codex has never registered (`Edit`, a
    Claude tool) replays with no API rejection, and the resumed model correctly names the tool it
    sees. The feared foreign-name/`call_id` validation failure did not occur. Verified end to end
-   through turnbridge's own `fabricate()`, not just hand-written files, so §5's
+   through threadhop's own `fabricate()`, not just hand-written files, so §5's
    text-folding recommendation is superseded for *paired* calls — see §5.1.
    An orphaned `function_call_output` also does not error, but it carries no `name` at all, so
    the tool's identity is lost; unpaired results therefore stay text-folded.
@@ -378,7 +378,7 @@ keyed on role. It diverges from our verified-safe approach in two ways worth fla
    unrelated dir. The default picker showed only the exact-match session — the nested one was
    filtered out too, so matching is an exact string comparison, **not** a path-prefix match.
    `codex resume --all` showed all three, confirming it lifts the filter entirely.
-   Consequence for turnbridge: a fabricated session sets `session_meta.cwd` to the launch cwd,
+   Consequence for threadhop: a fabricated session sets `session_meta.cwd` to the launch cwd,
    so it appears in the default picker only from that exact directory — correct, but worth
    knowing it will not surface from a subdirectory of the repo.
 4. **Very large fabricated histories — verified clean to 300 turns / ~217 KB** (probe,
@@ -386,15 +386,15 @@ keyed on role. It diverges from our verified-safe approach in two ways worth fla
    rollout resumed in ~5s with markers planted in both the first and last turns recalled: no
    size limit, no rejection, and no evidence of early history being dropped on load. Automatic
    `compacted` triggering was not observed at this size.
-   **Beyond ~300 turns is deliberately unmeasured** — turnbridge passes history through
+   **Beyond ~300 turns is deliberately unmeasured** — threadhop passes history through
    untruncated and leaves fitting it to Codex's own compaction. Re-run with `PROBE_TURNS=N` to
    push the ceiling.
 5. **`base_instructions` — RESOLVED as a deliberate omission, not an open question.** Real
    files carry a large (~18KB) system prompt per session. Omitting it works (verified originally,
    and continuously since by `probe-codex-content.mjs` and the 300-turn history probe): Codex
    falls back to its own current default for the new turn while the fabricated history replays
-   as-is. turnbridge will keep omitting it, because the alternative is worse: the source
-   session's *actual* system prompt is not something turnbridge can know — it belongs to the
+   as-is. threadhop will keep omitting it, because the alternative is worse: the source
+   session's *actual* system prompt is not something threadhop can know — it belongs to the
    other CLI and is not captured in the ledger — so writing any value here would be inventing
    a claim about what the original session was told. An honest gap beats a fabricated one, and
    the stated goal (make prior context visible) does not depend on it.
@@ -405,7 +405,7 @@ keyed on role. It diverges from our verified-safe approach in two ways worth fla
 7. **Interactive TUI resume** was only verified to "not error and begin rendering" via a pty
    wrapper (`script`); we could not capture/assert on the actual rendered TUI content
    programmatically. `codex exec resume --json` is the fully-verified, content-confirmed path
-   and should be turnbridge's primary target/test surface; treat TUI-resume compatibility as
+   and should be threadhop's primary target/test surface; treat TUI-resume compatibility as
    "very likely fine, same underlying loader" rather than independently proven line-for-line.
 
 ---

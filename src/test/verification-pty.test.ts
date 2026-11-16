@@ -4,8 +4,8 @@ import { runPty } from "../verification/pty.js";
 import { isolatedEnvironment } from "../verification/process.js";
 
 test("verification environment excludes parent credentials and session settings", () => {
-  const env = isolatedEnvironment("/tmp/turnbridge-isolation", "/usr/bin:/bin");
-  assert.equal(env.HOME, "/tmp/turnbridge-isolation");
+  const env = isolatedEnvironment("/tmp/threadhop-isolation", "/usr/bin:/bin");
+  assert.equal(env.HOME, "/tmp/threadhop-isolation");
   assert.equal(env.GIT_CONFIG_GLOBAL, "/dev/null");
   assert.equal(env.ANTHROPIC_API_KEY, undefined);
   assert.equal(env.CODEX_HOME, undefined);

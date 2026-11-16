@@ -389,7 +389,7 @@ function convertBlocksToParts(blocks: TurnBlock[], opts: ConvertOptions): Import
  * Picker title for a bridged session: the first human message, truncated.
  *
  * Same reasoning as the Claude Code adapter's: without this the session is
- * titled by turnbridge's own import notice, which is identical for every
+ * titled by threadhop's own import notice, which is identical for every
  * bridge and describes the machinery rather than the conversation.
  */
 function pickerTitle(summary: ConversationSummary): string {
@@ -484,7 +484,7 @@ export function buildImportPayload(
   // IDs still place the synthetic notice first without changing any real turn.
   const noticeMs = Math.max(0, earliestEventMs(summary, now) - 1);
   const noticeText =
-    `[turnbridge import notice] This conversation was imported from ${importSourceLabel(summary)}. ` +
+    `[threadhop import notice] This conversation was imported from ${importSourceLabel(summary)}. ` +
     "The history below is the literal visible transcript. Past tool calls are replayed as history " +
     "records, not as calls to re-run. " +
     (replayCount > 0
@@ -588,7 +588,7 @@ export function buildImportPayload(
   return {
     info: {
       id: sessionId,
-      slug: `tb-${sessionId.slice(0, 8)}`,
+      slug: `thop-${sessionId.slice(0, 8)}`,
       projectID: projectId,
       directory: cwd,
       path: "",
@@ -765,7 +765,7 @@ export function createOpenCodeTarget(name: "opencode" | "kilo" = "opencode"): Ta
     if (replayCount > 0) {
       notes.push(
         `replayed ${replayCount} visible-thinking block(s) as reasoning parts ` +
-          "(disable with reasoningReplay: false in ~/.turnbridge/config.json or --no-reasoning-replay)",
+          "(disable with reasoningReplay: false in ~/.threadhop/config.json or --no-reasoning-replay)",
       );
     }
 

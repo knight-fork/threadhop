@@ -55,7 +55,7 @@ test("reasoning events ride along in seq order but never count as turns", async 
         kind: "annotation",
         occurred_at: "2026-01-01T00:00:01.750Z",
         actor: { type: "system", id: "test" },
-        producer: { tool: "turnbridge-test", source: "codex" },
+        producer: { tool: "threadhop-test", source: "codex" },
         stream: { id: `codex:${SID_A}`, seq: 1 },
         content: { text: "not conversation history" },
       },

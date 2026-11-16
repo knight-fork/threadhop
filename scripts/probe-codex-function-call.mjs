@@ -154,6 +154,8 @@ for (const r of results) {
   console.log(`${r.name.padEnd(16)} ${verdict}  exit=${r.exit} marker=${r.recalled} tool_named=${r.sawTool}`);
   if (!r.recalled || r.errored) {
     console.log(`  tail: ${r.out.trim().split("\n").slice(-4).join("\n        ")}`);
+    const errorLines = r.out.split("\n").filter((line) => /\berror\b/i.test(line));
+    if (errorLines.length) console.log(`  error lines: ${errorLines.slice(0, 6).join("\n               ")}`);
   }
 }
 
@@ -181,7 +183,7 @@ if (!requested.length || requested.includes("e2e")) {
     occurred_at: `2026-01-01T00:00:0${seq}.000Z`,
     actor: role === "user" ? { type: "human", id: "probe@threadhop.test" } : { type: "agent", id: "claude-probe" },
     producer: { tool: "threadhop-probe", source: "claude-code", session_id: cid.split(":")[1] },
-    conversation: { id: cid, seq },
+    stream: { id: cid, seq },
     content: { role, blocks },
   });
   await appendEvents(repo, [

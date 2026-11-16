@@ -7,8 +7,10 @@ fabricated prior conversation visible to the model.
 Pinned environment:
 - `codex --version` → **codex-cli 0.144.6** (some session files on disk were written by 0.144.5;
   format is stable across that point release). **Revalidated against 0.145.0 (2026-07-21/27) and
-  0.146.0 (2026-08-02) with no format change — see §10 for the 0.146.0 evidence.** The adapter's
-  `VALIDATED_VERSION_PREFIXES` accepts `0.144.x`, `0.145.x`, `0.146.x`.
+  0.146.0 (2026-08-02) with no format change — see §10 for the 0.146.0 evidence — and against
+  0.169.0 (2026-11-16), which writes a newer format of its own but still reads the one threadhop
+  writes — see §12.** The adapter's `VALIDATED_VERSION_PREFIXES` accepts `0.144.x`, `0.145.x`,
+  `0.146.x`, `0.169.x`.
 - Tested on macOS (darwin), zsh shell, `$CODEX_HOME` = `~/.codex` (default).
 
 Everything in this document was verified empirically against this exact build on 2026-07-18/19,
@@ -495,6 +497,50 @@ Consequences for update-in-place (`planRolloutAppend` in `src/targets/codex.ts`)
 - Because an append cannot change the header, a copy whose import notice would now read
   differently (a changed replayed-reasoning count) is refused and a new copy is made.
 
-Fabrication itself also still loads on 0.169.0 (the history rendered in the real TUI), but the
-validated prefixes in `src/targets/codex.ts` were **not** advanced: that still needs the full
-§10-style revalidation (content recall, function-call, large-history and interactive probes).
+Fabrication itself also still loads on 0.169.0 (the history rendered in the real TUI). The
+validated prefixes were not advanced on this evidence alone; the full §10-style revalidation that
+advanced them is §12.
+
+## 12. Revalidation log — codex-cli 0.169.0 (2026-11-16)
+
+Re-measured against a live 0.169.0 install on macOS, as §10 was for 0.146.0. The model probes ran
+against the installer's real account in its own `~/.codex` (copying OAuth credentials into a
+disposable home risks rotating the real refresh token), with threadhop's config pointed at an empty
+directory so no mirror hook could act; every rollout they created was deleted afterwards.
+
+**Structural diff against a real 0.169.0-authored session** (`codex exec --json` in a scratch repo).
+Unlike 0.146.0, Codex's own output format **has** moved on:
+
+| property | 0.146.0 (§10) | 0.169.0 observed |
+|---|---|---|
+| top-level line shape | `{timestamp, type, payload}` | adds an integer `ordinal` to every line; some lines also carry `metadata` |
+| record types | `session_meta`, `event_msg`, `response_item`, `turn_context`, `world_state` | same, plus a top-level `token_usage_record`, `response_item`/`additional_tools`, and `event_msg`/`thread_settings_applied` (§11) |
+| `session_meta` payload | §4.1 union, `history_mode: "legacy"` | `history_mode: "paginated"`; adds `session_id`, `thread_source`, `account_scoped`, `creator_account_id`, `creator_user_id`, `runtime_workspace_roots` |
+| message content blocks | `input_text` / `output_text`, assistant carries `phase` | unchanged; assistant messages also carry `internal_chat_message_metadata_passthrough` |
+| filename / directory | `rollout-<local-ts>-<uuid>.jsonl` under local-date dirs | unchanged — file stamped `10:31Z` landed in `2026/11/16/` (IST) |
+
+threadhop keeps writing the older shape (`history_mode: "legacy"`, no `ordinal`s). Whether 0.169.0
+still *reads* that shape fully, into the model's context and not just the TUI, is what the
+functional probes below answer: it does.
+
+**Functional probes** (the probe scripts had drifted from the ledger schema — they drafted events
+with `conversation` instead of `stream` — and were fixed first):
+
+| probe | result |
+|---|---|
+| `probe-codex-content.mjs` (fabricate → `codex exec resume` → recall) | PASS — marker recalled |
+| `probe-codex-function-call.mjs` (3 variants + e2e) | text-folded USABLE, paired-foreign USABLE (tool named), e2e USABLE. orphan-output now reports BROKEN, but only because 0.169.0 logs `ERROR codex_core::util: Orphan function call output for call id: …` to stderr: exit 0, marker recalled, tool identity lost — the §5.1 behaviour, now announced. threadhop never writes an orphaned output (unpaired results are text-folded), so it is unaffected. |
+| `probe-large-history.mjs codex` | CLEAN — 300 turns / 217 KB, resumed in 8.9s (4.8s on 0.146.0), first- and last-turn markers both recalled |
+| `npm run verify:installed -- --only codex --mode native-import` (scripted provider, disposable profile, real PTY) | pass — model context, new tool use, automatic capture, history rendering, lineage, subsequent resume and normal exit |
+
+**Capture in the other direction.** conversation-ledger 0.27.1 (`f9853f7`) captures a 0.169.0
+rollout into turns threadhop lists with the right owner and title; only `additional_tools` is kept
+raw as unrecognised, which carries no conversation content.
+
+**Hooks.** 0.169.0 clamps a `SessionEnd` hook's timeout to 3s and prints
+`warning: clamping SessionEnd hook timeout to 3s` on every run when a hook asks for more, so the
+mirror trigger's Codex `SessionEnd` hook uses 3s.
+
+Still unmeasured, as before: `custom_tool_call` fabrication, histories beyond ~300 turns, and
+encrypted-reasoning blob TTL. Not adopted: writing the `paginated` format, since `legacy` remains
+accepted and is what every validated release reads.

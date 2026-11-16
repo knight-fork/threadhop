@@ -1,5 +1,5 @@
 // Content-level revalidation probe, run against whatever codex is installed
-// (0.145.0 originally; last run 0.146.0, 2026-08-02): fabricate a session
+// (0.145.0 originally; last run 0.169.0, 2026-11-16): fabricate a session
 // from a planted-marker conversation, then `codex exec resume <id>` asking
 // the model to recall the marker — proves the model actually sees the
 // fabricated history, not just that the TUI renders it.
@@ -28,7 +28,7 @@ const turn = (role, text, seq) => ({
   occurred_at: `2026-01-01T00:00:0${seq}.000Z`,
   actor: role === "user" ? { type: "human", id: "smoke@threadhop.test" } : { type: "agent", id: "probe-model" },
   producer: { tool: "threadhop-smoke", source: "claude-code", session_id: conversationId.split(":")[1] },
-  conversation: { id: conversationId, seq },
+  stream: { id: conversationId, seq },
   content: { role, blocks: [{ type: "text", text }] },
 });
 await appendEvents(repo, [

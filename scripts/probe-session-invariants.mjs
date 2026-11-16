@@ -45,7 +45,7 @@ const turn = (role, text, seq) => ({
       ? { type: "human", id: "probe@threadhop.test" }
       : { type: "agent", id: "probe-model" },
   producer: { tool: "threadhop-probe", source: "codex", session_id: conversationId.split(":")[1] },
-  conversation: { id: conversationId, seq },
+  stream: { id: conversationId, seq },
   content: { role, blocks: [{ type: "text", text }] },
 });
 await appendEvents(repo, [

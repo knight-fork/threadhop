@@ -46,7 +46,7 @@ const turn = (role, text, seq) => ({
   occurred_at: `2026-01-01T00:00:0${seq}.000Z`,
   actor: role === "user" ? { type: "human", id: "smoke@threadhop.test" } : { type: "agent", id: "probe-model" },
   producer: { tool: "threadhop-smoke", source: "claude-code", session_id: conversationId.split(":")[1] },
-  conversation: { id: conversationId, seq },
+  stream: { id: conversationId, seq },
   content: { role, blocks: [{ type: "text", text }] },
 });
 await appendEvents(repo, [

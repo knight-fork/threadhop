@@ -87,7 +87,7 @@ for (const targetName of targetNames) {
         ? { type: "human", id: "probe@threadhop.test" }
         : { type: "agent", id: "probe-model" },
       producer: { tool: "threadhop-probe", source, session_id: sessionId },
-      conversation: { id: cid, seq },
+      stream: { id: cid, seq },
       content: { role: isUser ? "user" : "assistant", blocks: [{ type: "text", text }] },
     });
   }

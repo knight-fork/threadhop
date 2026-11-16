@@ -7,6 +7,7 @@ import { listConversations } from "./conversations.js";
 import { fabricateCopy, historyFor, recordCopy } from "./copies.js";
 import { withMirrorLock } from "./mirror-lock.js";
 import { readLineage, type Lineage } from "./lineage.js";
+import { branchRows, buildBranchTree, withBranchesOfYours, type BranchNode, type BranchRow } from "./tree.js";
 import { runInteractiveLaunchPlan } from "./interactive-launch.js";
 import { withLedgerNotices } from "./ledger-io.js";
 import { confirm, pickFromList } from "./picker.js";
@@ -44,11 +45,18 @@ function lineageTag(summary: ConversationSummary, lineage: Lineage | undefined):
   return null;
 }
 
+/** Where a branch starts and how far it got: "↳ from turn 4, +2 turns". */
+function branchTag(node: BranchNode): string {
+  const own = `+${node.ownTurns} turn${node.ownTurns === 1 ? "" : "s"}`;
+  return node.forkTurn === null ? `↳ ${own}` : `↳ from turn ${node.forkTurn}, ${own}`;
+}
+
 export function renderConversationRow(
   summary: ConversationSummary,
   index: number,
   selfEmail: string | null,
   lineage?: Lineage,
+  branch?: BranchRow,
 ): string {
   const owner =
     summary.owners.length === 0
@@ -56,16 +64,22 @@ export function renderConversationRow(
       : summary.owners.every((o) => o === selfEmail)
         ? null
         : summary.ownerDisplays[0] ?? summary.owners[0]!;
+  const prefix = branch?.prefix ?? "";
   const parts = [
     `[${index + 1}]`,
-    cliLabel(summary.source).padEnd(11),
+    `${prefix}${cliLabel(summary.source)}`.padEnd(11 + prefix.length),
     relativeTime(summary.lastActivity).padStart(8),
-    `${summary.turnCount} turns`.padStart(9),
+    // A branch's own count (where it started plus what it added) leaves out
+    // the import notice threadhop wrote into the copy.
+    `${branch?.node.from && branch.node.forkTurn !== null ? branch.node.forkTurn + branch.node.ownTurns : summary.turnCount} turns`.padStart(9),
   ];
   if (owner) parts.push(`by ${owner}`);
-  const tag = lineageTag(summary, lineage);
+  // In the tree, branches show where they start; a root only says where it
+  // came from (its parent isn't listed), since its branches are drawn below it.
+  const parentOnly = lineage && branch ? { parentOf: lineage.parentOf, childrenOf: new Map() } : lineage;
+  const tag = branch?.node.from ? branchTag(branch.node) : lineageTag(summary, parentOnly);
   if (tag) parts.push(tag);
-  parts.push(`· ${summary.title}`);
+  parts.push(`· ${(branch?.node.from && branch.node.label) || summary.title}`);
   return parts.join("  ");
 }
 
@@ -189,19 +203,20 @@ export async function resumeCommand(flags: ResumeFlags): Promise<number> {
     return 1;
   }
 
+  // Branches: where you left off and where anyone who continued your work
+  // left off, side by side, so either point can be resumed.
+  const offered = flags.all ? conversations : withBranchesOfYours(conversations, availableConversations, lineage);
+  const rows = branchRows(buildBranchTree(offered, lineage));
+  const render = (row: BranchRow, i: number) => renderConversationRow(row.node.summary, i, identity.email, lineage, row);
+
   if (flags.listOnly) {
-    conversations.forEach((c, i) =>
-      process.stdout.write(renderConversationRow(c, i, identity.email, lineage) + "\n"),
-    );
+    rows.forEach((row, i) => process.stdout.write(render(row, i) + "\n"));
     return 0;
   }
 
-  const summary = await pickFromList(
-    conversations,
-    (c, i) => renderConversationRow(c, i, identity.email, lineage),
-    "Resume which conversation?",
-  );
-  if (!summary) return 0;
+  const picked = await pickFromList(rows, render, "Resume which conversation?");
+  if (!picked) return 0;
+  const summary = picked.node.summary;
 
   const target = await chooseTarget(flags);
   if (!target) return 1;

@@ -142,6 +142,39 @@ still brought up to date on disk when the original changes, but the open
 session doesn't see those turns. Reopen it before typing; if you type first,
 the copy's file holds turns that session never saw.
 
+**Working with collaborators.** In a private repository, conversations can
+travel with the code, so a teammate can pick up where you left off and you can
+pick up where they did. Sharing is per repository: keep it off globally
+(`{"transport": {"hook": false, "fetchRefspec": false}}` in
+`~/.config/cledger/config.json`) and commit a `.cledger.json` with
+`{"transport": {"hook": true, "fetchRefspec": true}}` to the repositories you
+share. A public repository then never carries conversations.
+
+- `git push` uploads the conversations behind the branches you push (after a
+  secret scan); work you haven't pushed, and uncommitted changes, stay with you.
+- A teammate installs cledger and threadhop, runs
+  `threadhop records sync --fetch-only` once after cloning, and from then on a
+  plain `git fetch` or `git pull` brings conversations too. Naming a branch
+  (`git pull origin feature`) makes git skip them.
+- Each turn is recorded into the repository the CLI is running in when the turn
+  ends, so start Claude Code or Codex inside the project.
+
+Continuing someone's conversation starts a branch of it, and `threadhop list`
+and `resume` show branches the way `git log --graph` shows commits:
+
+```
+[1]  Claude Code  2h ago   6 turns  · plan the expression parser
+[2]  └─ Codex     1h ago   6 turns  by Bob  ↳ from turn 4, +2 turns  · handle operator precedence
+```
+
+Pick `[1]` to carry on from where you left off, or `[2]` to carry on from
+where Bob did: your first four turns, then his. Branches anyone made of your
+conversations are listed without `--all`; a copy nobody typed in is the same
+point as its original and isn't listed. Conversations follow the code they
+were anchored to, so a merged pull request brings its conversations into
+`main`'s history, and a declined one leaves them on its branch (`--any-commit`
+still lists them).
+
 opencode works in both directions as of conversation-ledger 0.18.0, which
 captures it via a `session.idle` plugin rather than a shell hook. Two things
 differ from the other CLIs in practice. Its sessions live in one shared SQLite

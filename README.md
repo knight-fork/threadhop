@@ -19,6 +19,9 @@ exactly that whenever it happens.
 
 ## Usage
 
+New machine? [docs/CHEATSHEET.md](docs/CHEATSHEET.md) has the install steps and
+everyday commands on one page.
+
 ```sh
 # capture (once per machine): conversation-ledger hooks
 cledger install all

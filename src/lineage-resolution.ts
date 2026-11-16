@@ -30,6 +30,19 @@ function isThreadhopNotice(event: EvidenceEvent): boolean {
   );
 }
 
+/**
+ * A native copy threadhop wrote that nobody has continued: every event in it
+ * was imported, none originated there. Once the target captures such a copy it
+ * looks like one more conversation, so mirroring skips it rather than copying
+ * a copy back and forth between CLIs. A copy with turns of its own is a real
+ * branch and is not untouched.
+ */
+export function isUntouchedCopy(summary: ConversationSummary, lineage: Lineage): boolean {
+  const parent = lineage.parentOf.get(summary.id);
+  if (!parent || parent.mode === "bootstrap") return false;
+  return summary.events.every((event) => atOrBefore(event, parent.occurredAt));
+}
+
 function sourceSeq(record: ContinuationRecord, event: EvidenceEvent): boolean {
   return (event.stream?.seq ?? Number.POSITIVE_INFINITY) <= record.importedThroughSeq;
 }

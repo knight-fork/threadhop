@@ -12,6 +12,13 @@ export interface ThreadhopConfig {
    * (see docs/WIP_TECHNICAL_DESIGN.md). Default on; set false to opt out.
    */
   reasoningReplay?: boolean;
+  /** Defaults for `threadhop mirror` when it is run without arguments. */
+  mirror?: {
+    /** Target CLIs to keep copies in; only those that update a copy in place. */
+    targets?: string[];
+    /** How many of your most recent conversations to mirror. */
+    limit?: number;
+  };
 }
 
 export function configDir(): string {

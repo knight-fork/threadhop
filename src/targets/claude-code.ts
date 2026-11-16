@@ -385,6 +385,7 @@ export const claudeCodeTarget: TargetAdapter = {
     const body = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
 
     const existing = opts.existingSessionId ? await readExisting(path) : null;
+    let fabrication: LaunchPlan["fabrication"] = "created";
     if (existing === null) {
       await writeFile(path, body, { mode: 0o600, flag: "wx" });
       notes.push(
@@ -407,6 +408,7 @@ export const claudeCodeTarget: TargetAdapter = {
         await appendFile(path, separator + plan.append.map((l) => JSON.stringify(l)).join("\n") + "\n");
       }
       const added = conversationLines(plan.append).length;
+      fabrication = added > 0 ? "updated" : "unchanged";
       notes.push(
         added > 0
           ? `updated Claude Code session ${sessionId} from ${cliLabel(summary.source)} history (+${added} line${added === 1 ? "" : "s"}, ${summary.turnCount} turns)`
@@ -420,6 +422,7 @@ export const claudeCodeTarget: TargetAdapter = {
       cwd,
       notes,
       fabricatedConversationId: `claude-code:${sessionId}`,
+      fabrication,
       importedSourceEventIds,
     };
   },

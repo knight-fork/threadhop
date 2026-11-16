@@ -478,6 +478,7 @@ export const codexTarget: TargetAdapter = {
       modelProvider,
     );
     const body = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+    let fabrication: LaunchPlan["fabrication"] = "created";
     if (existingPath) {
       const existing = await readFile(existingPath, "utf8");
       const plan = planRolloutAppend(existing, lines, sessionId);
@@ -489,6 +490,7 @@ export const codexTarget: TargetAdapter = {
         await appendFile(path, separator + plan.append.map((l) => JSON.stringify(l)).join("\n") + "\n");
       }
       const added = plan.append.length;
+      fabrication = added > 0 ? "updated" : "unchanged";
       notes.push(
         added > 0
           ? `updated Codex session ${sessionId} from ${cliLabel(summary.source)} history (+${added} line${added === 1 ? "" : "s"}, ${summary.turnCount} turns)`
@@ -518,6 +520,7 @@ export const codexTarget: TargetAdapter = {
       cwd,
       notes,
       fabricatedConversationId: `codex:${sessionId}`,
+      fabrication,
       importedSourceEventIds,
     };
   },

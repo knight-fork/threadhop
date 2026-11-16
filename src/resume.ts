@@ -4,20 +4,15 @@ import { recordPendingBootstrap, reconcileBootstrapContinuations } from "./boots
 import { writeBootstrapTranscript } from "./bootstrap.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { listConversations } from "./conversations.js";
-import { recordContinuation, readLineage, type Lineage } from "./lineage.js";
-import { resolveLineageHistory } from "./lineage-resolution.js";
+import { fabricateCopy, historyFor, recordCopy } from "./copies.js";
+import { readLineage, type Lineage } from "./lineage.js";
 import { runInteractiveLaunchPlan } from "./interactive-launch.js";
 import { withLedgerNotices } from "./ledger-io.js";
 import { confirm, pickFromList } from "./picker.js";
 import { installedTargets, targetFor } from "./targets/index.js";
 import { formatSize } from "./transcript.js";
-import {
-  FabricationUnsupportedError,
-  MirrorDivergedError,
-  type LaunchPlan,
-  type TargetAdapter,
-} from "./targets/types.js";
-import { cliLabel, type CliName, type ConversationSummary } from "./types.js";
+import { FabricationUnsupportedError, type LaunchPlan, type TargetAdapter } from "./targets/types.js";
+import { cliLabel, relativeTime, type CliName, type ConversationSummary } from "./types.js";
 import { threadhopVersion } from "./version.js";
 
 export interface ResumeFlags {
@@ -33,17 +28,6 @@ export interface ResumeFlags {
 
 export interface PlanOptions {
   newCopy?: boolean;
-}
-
-function relativeTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const mins = Math.round((Date.now() - then) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
 }
 
 /** Lineage annotation for a row: where it came from / where it was bridged. */
@@ -111,74 +95,6 @@ async function chooseTarget(flags: ResumeFlags): Promise<TargetAdapter | null> {
   return choice;
 }
 
-interface ReusableCopy {
-  sessionId: string;
-  occurredAt: string;
-}
-
-/**
- * Earlier native copies of `summary` in `target` that are on this machine,
- * newest first. Continuation records sync between collaborators, so only a
- * session the adapter can find locally (where a resume from `cwd` looks) is a
- * candidate; anything else would be recreated under someone else's id.
- */
-async function reusableCopies(
-  target: TargetAdapter,
-  summary: ConversationSummary,
-  lineage: Lineage,
-  cwd: string,
-): Promise<ReusableCopy[]> {
-  if (!target.supportsUpdateInPlace || !target.hasSession) return [];
-  const prefix = `${target.name}:`;
-  const records = (lineage.childrenOf.get(summary.id) ?? [])
-    .filter((rec) => rec.targetCli === target.name && rec.mode !== "bootstrap" && rec.target.startsWith(prefix))
-    .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
-  const copies: ReusableCopy[] = [];
-  for (const rec of records) {
-    const sessionId = rec.target.slice(prefix.length);
-    if (await target.hasSession(sessionId, cwd)) copies.push({ sessionId, occurredAt: rec.occurredAt });
-  }
-  return copies;
-}
-
-/**
- * Fabricate into the newest earlier copy that has not been continued, so
- * re-bridging a conversation brings that copy up to date instead of adding
- * another to the target's picker. A copy the user typed in is a branch of its
- * own: the adapter refuses it untouched and the next candidate is tried,
- * ending in a new session when none is left.
- */
-async function fabricateCopy(
-  target: TargetAdapter,
-  summary: ConversationSummary,
-  resolved: ConversationSummary,
-  lineage: Lineage,
-  cwd: string,
-  replayReasoning: boolean,
-  options: PlanOptions,
-): Promise<LaunchPlan> {
-  const label = cliLabel(target.name);
-  const candidates = options.newCopy ? [] : await reusableCopies(target, summary, lineage, cwd);
-  const skipped: string[] = [];
-  for (const copy of candidates) {
-    try {
-      const plan = await target.fabricate(resolved, cwd, { replayReasoning, existingSessionId: copy.sessionId });
-      plan.notes.unshift(
-        ...skipped,
-        `reusing the ${label} copy made ${relativeTime(copy.occurredAt)} instead of creating another ` +
-          "(--new-copy for a separate one)",
-      );
-      return plan;
-    } catch (err) {
-      if (!(err instanceof MirrorDivergedError)) throw err;
-      skipped.push(`not reusing the earlier ${label} copy: ${err.message}`);
-    }
-  }
-  const plan = await target.fabricate(resolved, cwd, { replayReasoning });
-  plan.notes.unshift(...skipped);
-  return plan;
-}
-
 export async function buildPlan(
   repo: RepoInfo,
   target: TargetAdapter,
@@ -193,25 +109,19 @@ export async function buildPlan(
   if (target.name === summary.source && !useBootstrap && target.supportsNativeResume !== false) {
     return target.nativeResume(summary.sessionId, cwd);
   }
-  const history = lineage.parentOf.has(summary.id)
-    ? resolveLineageHistory(summary, availableConversations, lineage)
-    : { summary, notes: [] };
+  const history = historyFor(summary, availableConversations, lineage);
   let nativeImportFallback: LaunchPlan["nativeImportFallback"];
   if (!useBootstrap) {
     try {
-      const plan = await fabricateCopy(target, summary, history.summary, lineage, cwd, replayReasoning, options);
+      // Resume is about to open the session, so a new copy beats none at all.
+      const { plan, reused } = await fabricateCopy(target, summary, history.summary, lineage, cwd, replayReasoning, {
+        newCopy: options.newCopy ?? false,
+        whenAllContinued: "create",
+      });
+      if (!plan) throw new Error("fabricateCopy skipped despite whenAllContinued: create");
+      if (reused) plan.notes.push("--new-copy makes a separate session instead");
       plan.notes.push(...history.notes);
-      if (plan.fabricatedConversationId) {
-        const lastSeq = summary.events[summary.events.length - 1]?.stream?.seq ?? 0;
-        await recordContinuation(repo, {
-          source: summary.id,
-          target: plan.fabricatedConversationId,
-          importedThroughSeq: lastSeq,
-          sourceEventIds: plan.importedSourceEventIds ?? [],
-          targetCli: target.name,
-          version: threadhopVersion(),
-        });
-      }
+      await recordCopy(repo, target, summary, plan);
       return plan;
     } catch (err) {
       if (!(err instanceof FabricationUnsupportedError)) throw err;

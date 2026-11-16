@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { runRecordsCommand } from "annals";
 import { asLedger, findRepo } from "conversation-ledger";
+import { mirrorCommand, type MirrorFlags } from "./mirror.js";
 import { resumeCommand, type ResumeFlags } from "./resume.js";
 import { shimInstall, shimStatus, shimUninstall } from "./shim.js";
 import { parseCliName } from "./types.js";
@@ -11,6 +12,8 @@ const USAGE = `threadhop — continue a coding-agent conversation in another CLI
 Usage:
   threadhop resume [target-cli] [options]             pick a conversation and resume it
   threadhop list [options]                            print compatible conversations
+  threadhop mirror [target-cli...] [options]          keep copies of your recent conversations
+                                                       in other CLIs' own resume pickers
   threadhop targets [--json]                          show implemented target routes
   threadhop shim install|uninstall|status             opt-in \`claude --resume\` interception
   threadhop records <command>                         maintain shared cledger records
@@ -25,6 +28,11 @@ Options for resume/list:
                 fabricating back into Codex (default: replay them)
   --new-copy    create a separate session in the target even when an earlier
                 copy you haven't typed in could be updated (Claude Code, Codex)
+
+Options for mirror (targets default to "mirror.targets" in ~/.threadhop/config.json):
+  --limit N     how many of your most recent conversations to mirror (default 10)
+  --dry-run     show what would be created or updated without writing anything
+  --any-commit  include conversations anchored to commits not reachable from HEAD
 `;
 
 const RECORD_ALIASES = new Map([
@@ -102,6 +110,29 @@ async function main(argv: string[]): Promise<number> {
       }
     }
     return resumeCommand(flags);
+  }
+
+  if (command === "mirror") {
+    const flags: MirrorFlags = { targets: [] };
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i]!;
+      if (arg === "--dry-run") flags.dryRun = true;
+      else if (arg === "--any-commit") flags.anyCommit = true;
+      else if (arg === "--limit" || arg.startsWith("--limit=")) {
+        const value = arg === "--limit" ? args[++i] : arg.slice("--limit=".length);
+        const limit = Number(value);
+        if (!Number.isInteger(limit) || limit < 1) {
+          process.stderr.write("threadhop mirror: --limit takes a positive whole number\n");
+          return 1;
+        }
+        flags.limit = limit;
+      } else if (!arg.startsWith("-")) flags.targets.push(arg);
+      else {
+        process.stderr.write(`threadhop: unknown option: ${arg}\n`);
+        return 1;
+      }
+    }
+    return mirrorCommand(flags);
   }
 
   if (command === "shim") {

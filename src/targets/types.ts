@@ -20,6 +20,12 @@ export interface LaunchPlan {
   nativeImportFallback?: { kind: "format" | "environment"; reason: string };
   /** Ordered ids of source events the fabricated target actually contains. */
   importedSourceEventIds?: string[];
+  /**
+   * What fabrication did to the target session: wrote a new one, appended to
+   * an earlier copy, or found that copy already current. Adapters without
+   * update-in-place always create, and may leave this unset.
+   */
+  fabrication?: "created" | "updated" | "unchanged";
 }
 
 export interface TargetAdapter {

@@ -30,6 +30,7 @@ threadhop resume claude     # resume straight into Claude Code
 threadhop resume opencode   # resume straight into opencode
 threadhop resume qwen       # native visible-text import where format supported
 threadhop resume gemini     # transcript bootstrap
+threadhop mirror codex claude   # keep your recent conversations in these CLIs' own pickers
 threadhop targets           # list implemented routes for all twenty targets
 threadhop list              # print compatible conversations
 threadhop records --help    # shared cledger records maintenance commands
@@ -80,6 +81,29 @@ session to that CLI's picker. A copy is only reused when it is on this machine
 (for Claude Code, written from the same directory) and you have not typed in
 it; a copy you continued is your own branch, so it is left exactly as it is and
 a new copy is made. `--new-copy` always makes a separate session.
+
+**Mirroring.** `threadhop mirror <target-cli...>` keeps one up-to-date copy of
+each of your recent conversations in each named CLI, so they show up in that
+CLI's own resume picker (`claude --resume`, `codex resume`) without running
+threadhop first. Each run creates missing copies and brings existing ones up to
+date in place; a run with nothing new writes nothing. Only Claude Code and Codex
+are supported, because they can update a copy rather than add another session
+every time. It is deliberately narrow:
+
+- only **your own** conversations: every human turn must carry your git email,
+  so collaborators' and shared conversations are never copied;
+- the `--limit` (default 10) most recent, from this repo's ledger;
+- never into the CLI a conversation came from, and never a copy threadhop wrote
+  that nobody has continued (so copies can't bounce between CLIs);
+- a copy you continued is your own branch: it is left exactly as it is and no
+  replacement is made (`threadhop resume` makes a fresh copy on demand), while
+  the continued copy is itself mirrored like any other conversation of yours;
+- no bootstrap fallback, since that would start a live session.
+
+Copies are filed for the directory mirror runs in, which is where those CLIs'
+pickers look. `--dry-run` shows what would be created or updated. Targets and
+limit can be set once in `~/.threadhop/config.json`:
+`{"mirror": {"targets": ["codex", "claude-code"], "limit": 10}}`.
 
 opencode works in both directions as of conversation-ledger 0.18.0, which
 captures it via a `session.idle` plugin rather than a shell hook. Two things

@@ -11,7 +11,12 @@ import { withLedgerNotices } from "./ledger-io.js";
 import { confirm, pickFromList } from "./picker.js";
 import { installedTargets, targetFor } from "./targets/index.js";
 import { formatSize } from "./transcript.js";
-import { FabricationUnsupportedError, type LaunchPlan, type TargetAdapter } from "./targets/types.js";
+import {
+  FabricationUnsupportedError,
+  MirrorDivergedError,
+  type LaunchPlan,
+  type TargetAdapter,
+} from "./targets/types.js";
 import { cliLabel, type CliName, type ConversationSummary } from "./types.js";
 import { threadhopVersion } from "./version.js";
 
@@ -22,6 +27,12 @@ export interface ResumeFlags {
   bootstrap?: boolean;
   listOnly?: boolean;
   noReasoningReplay?: boolean;
+  /** Always fabricate a separate copy instead of updating an earlier one. */
+  newCopy?: boolean;
+}
+
+export interface PlanOptions {
+  newCopy?: boolean;
 }
 
 function relativeTime(iso: string): string {
@@ -100,6 +111,74 @@ async function chooseTarget(flags: ResumeFlags): Promise<TargetAdapter | null> {
   return choice;
 }
 
+interface ReusableCopy {
+  sessionId: string;
+  occurredAt: string;
+}
+
+/**
+ * Earlier native copies of `summary` in `target` that are on this machine,
+ * newest first. Continuation records sync between collaborators, so only a
+ * session the adapter can find locally (where a resume from `cwd` looks) is a
+ * candidate; anything else would be recreated under someone else's id.
+ */
+async function reusableCopies(
+  target: TargetAdapter,
+  summary: ConversationSummary,
+  lineage: Lineage,
+  cwd: string,
+): Promise<ReusableCopy[]> {
+  if (!target.supportsUpdateInPlace || !target.hasSession) return [];
+  const prefix = `${target.name}:`;
+  const records = (lineage.childrenOf.get(summary.id) ?? [])
+    .filter((rec) => rec.targetCli === target.name && rec.mode !== "bootstrap" && rec.target.startsWith(prefix))
+    .sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+  const copies: ReusableCopy[] = [];
+  for (const rec of records) {
+    const sessionId = rec.target.slice(prefix.length);
+    if (await target.hasSession(sessionId, cwd)) copies.push({ sessionId, occurredAt: rec.occurredAt });
+  }
+  return copies;
+}
+
+/**
+ * Fabricate into the newest earlier copy that has not been continued, so
+ * re-bridging a conversation brings that copy up to date instead of adding
+ * another to the target's picker. A copy the user typed in is a branch of its
+ * own: the adapter refuses it untouched and the next candidate is tried,
+ * ending in a new session when none is left.
+ */
+async function fabricateCopy(
+  target: TargetAdapter,
+  summary: ConversationSummary,
+  resolved: ConversationSummary,
+  lineage: Lineage,
+  cwd: string,
+  replayReasoning: boolean,
+  options: PlanOptions,
+): Promise<LaunchPlan> {
+  const label = cliLabel(target.name);
+  const candidates = options.newCopy ? [] : await reusableCopies(target, summary, lineage, cwd);
+  const skipped: string[] = [];
+  for (const copy of candidates) {
+    try {
+      const plan = await target.fabricate(resolved, cwd, { replayReasoning, existingSessionId: copy.sessionId });
+      plan.notes.unshift(
+        ...skipped,
+        `reusing the ${label} copy made ${relativeTime(copy.occurredAt)} instead of creating another ` +
+          "(--new-copy for a separate one)",
+      );
+      return plan;
+    } catch (err) {
+      if (!(err instanceof MirrorDivergedError)) throw err;
+      skipped.push(`not reusing the earlier ${label} copy: ${err.message}`);
+    }
+  }
+  const plan = await target.fabricate(resolved, cwd, { replayReasoning });
+  plan.notes.unshift(...skipped);
+  return plan;
+}
+
 export async function buildPlan(
   repo: RepoInfo,
   target: TargetAdapter,
@@ -109,6 +188,7 @@ export async function buildPlan(
   lineage: Lineage,
   availableConversations: ConversationSummary[],
   replayReasoning: boolean,
+  options: PlanOptions = {},
 ): Promise<LaunchPlan> {
   if (target.name === summary.source && !useBootstrap && target.supportsNativeResume !== false) {
     return target.nativeResume(summary.sessionId, cwd);
@@ -119,7 +199,7 @@ export async function buildPlan(
   let nativeImportFallback: LaunchPlan["nativeImportFallback"];
   if (!useBootstrap) {
     try {
-      const plan = await target.fabricate(history.summary, cwd, { replayReasoning });
+      const plan = await fabricateCopy(target, summary, history.summary, lineage, cwd, replayReasoning, options);
       plan.notes.push(...history.notes);
       if (plan.fabricatedConversationId) {
         const lastSeq = summary.events[summary.events.length - 1]?.stream?.seq ?? 0;
@@ -227,6 +307,7 @@ export async function resumeCommand(flags: ResumeFlags): Promise<number> {
     lineage,
     availableConversations,
     replayReasoning,
+    { newCopy: flags.newCopy ?? false },
   );
   const code = await runInteractiveLaunchPlan(plan);
   await reconcileBootstrapContinuations(repo);

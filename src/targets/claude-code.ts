@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { normalizeTimestamp } from "../timestamps.js";
 import { formatSize, transcriptSize } from "../transcript.js";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { bootstrapPrompt } from "../bootstrap.js";
@@ -326,6 +326,18 @@ export const claudeCodeTarget: TargetAdapter = {
   name: "claude-code",
   binary: "claude",
   supportsUpdateInPlace: true,
+
+  // `claude --resume <id>` only looks in the project dir encoded from cwd, so
+  // a session written from another directory is not one this resume can use.
+  async hasSession(sessionId: string, cwd: string): Promise<boolean> {
+    try {
+      await stat(join(projectsDir(), encodeProjectDir(cwd), `${sessionId}.jsonl`));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  },
 
   isInstalled() {
     return binaryOnPath("claude");

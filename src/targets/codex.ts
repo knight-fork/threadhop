@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { toolInput } from "../tool-input.js";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { parse } from "smol-toml";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,6 @@ import { normalizeTimestamp } from "../timestamps.js";
 import { formatSize, transcriptSize } from "../transcript.js";
 import { binaryOnPath } from "../launch.js";
 import { eventKeys, stableUuid } from "../stable-id.js";
-import { replaceAtomically } from "../atomic-write.js";
 import {
   cliLabel,
   importSourceLabel,
@@ -327,10 +326,31 @@ export function buildRolloutLines(
 
 /**
  * session_meta plus the import notice's two lines (model record and display
- * twin). The notice text tracks the replayed-reasoning count, so it may
- * legitimately change between writes; everything after it is history.
+ * twin); everything after it is history. The notice text tracks the
+ * replayed-reasoning count, so a later write can need a different notice.
  */
 export const ROLLOUT_HEADER_LINES = 3;
+
+/**
+ * Records Codex appends to a rollout when it is merely opened, with nothing
+ * typed. Verified on 0.169.0: `codex resume <id>` appends one
+ * `thread_settings_applied` event (the model, provider and approval settings
+ * the session opened with). They hold the user's state and are not turns, so
+ * an update keeps them. Deliberately an allowlist: an unrecognised record
+ * still counts as divergence, because refusing is recoverable and appending
+ * past a user's own turns is not.
+ */
+const CODEX_OPEN_RECORDS = new Set(["thread_settings_applied"]);
+
+function isCodexOpenRecord(line: unknown): boolean {
+  const record = line as { type?: unknown; payload?: { type?: unknown } } | null;
+  return record?.type === "event_msg" && CODEX_OPEN_RECORDS.has(record.payload?.type as string);
+}
+
+function withoutTimestamp(line: unknown): string {
+  const { timestamp: _timestamp, ...rest } = (line ?? {}) as Record<string, unknown>;
+  return JSON.stringify(rest);
+}
 
 /** The rollout file for `sessionId` under Codex's dated session tree, if any. */
 async function findRollout(sessionId: string): Promise<string | null> {
@@ -346,41 +366,59 @@ async function findRollout(sessionId: string): Promise<string | null> {
 }
 
 /**
- * Why rewriting `existing` with `next` would lose content, or null when it is
- * safe: the file is this session's, and every history line after the header
- * is, in order, the line threadhop would write now. Codex appends turns and
- * turn-context records when a session is continued, and those show up here as
- * lines threadhop did not write.
+ * How to bring the rollout `existing` up to date with `next`, or why it
+ * can't be. Like Claude Code, Codex writes to a session as soon as it is
+ * opened (see CODEX_OPEN_RECORDS), so an update appends instead of rewriting:
+ * Codex's own records stay where they are, and a Codex process that has the
+ * file open keeps appending to the same file rather than to a replaced one.
+ *
+ * Every other history line must be, in order, the line threadhop would write
+ * now; then the rest is appended. Codex writes turns and turn_context records
+ * when a session is continued, and those show up here as lines threadhop did
+ * not write. A notice that would now read differently (a changed
+ * replayed-reasoning count) is refused too, since appending cannot correct it.
  */
-export function rolloutDivergence(existing: string, next: RolloutLine[], sessionId: string): string | null {
+export function planRolloutAppend(
+  existing: string,
+  next: RolloutLine[],
+  sessionId: string,
+): { reason: string } | { append: RolloutLine[] } {
   const raw = existing.split("\n").filter((line) => line.trim());
   let parsed: unknown[];
   try {
     parsed = raw.map((line) => JSON.parse(line) as unknown);
   } catch {
-    return "has a line that is not JSON";
+    return { reason: "has a line that is not JSON" };
   }
   const meta = parsed[0] as { type?: unknown; payload?: { id?: unknown } } | undefined;
   if (meta?.type !== "session_meta" || meta.payload?.id !== sessionId) {
-    return "does not start with this session's session_meta";
+    return { reason: "does not start with this session's session_meta" };
   }
-  const history = parsed.slice(ROLLOUT_HEADER_LINES);
-  const ours = next.slice(ROLLOUT_HEADER_LINES);
-  if (history.length > ours.length) {
-    return "has lines threadhop did not write (was it continued after resuming?)";
-  }
-  for (const [index, line] of history.entries()) {
-    if (JSON.stringify(line) !== JSON.stringify(ours[index])) {
-      return "has lines threadhop did not write (was it continued after resuming?)";
+  for (let index = 1; index < ROLLOUT_HEADER_LINES; index++) {
+    if (withoutTimestamp(parsed[index]) !== withoutTimestamp(next[index])) {
+      return { reason: "has an import notice that no longer matches what would be imported" };
     }
   }
-  return null;
+  const ours = next.slice(ROLLOUT_HEADER_LINES);
+  let matched = 0;
+  for (const line of parsed.slice(ROLLOUT_HEADER_LINES)) {
+    if (isCodexOpenRecord(line)) continue;
+    if (matched >= ours.length || JSON.stringify(line) !== JSON.stringify(ours[matched])) {
+      return { reason: "has lines threadhop did not write (was it continued after resuming?)" };
+    }
+    matched++;
+  }
+  return { append: ours.slice(matched) };
 }
 
 export const codexTarget: TargetAdapter = {
   name: "codex",
   binary: "codex",
   supportsUpdateInPlace: true,
+
+  async hasSession(sessionId: string): Promise<boolean> {
+    return (await findRollout(sessionId)) !== null;
+  },
 
   isInstalled() {
     return binaryOnPath("codex");
@@ -441,19 +479,29 @@ export const codexTarget: TargetAdapter = {
     );
     const body = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
     if (existingPath) {
-      const reason = rolloutDivergence(await readFile(existingPath, "utf8"), lines, sessionId);
-      if (reason) {
-        throw new MirrorDivergedError(`Codex session ${sessionId} ${reason}; leaving it untouched`, "codex", sessionId);
+      const existing = await readFile(existingPath, "utf8");
+      const plan = planRolloutAppend(existing, lines, sessionId);
+      if ("reason" in plan) {
+        throw new MirrorDivergedError(`Codex session ${sessionId} ${plan.reason}; leaving it untouched`, "codex", sessionId);
       }
-      await replaceAtomically(path, body);
+      if (plan.append.length > 0) {
+        const separator = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+        await appendFile(path, separator + plan.append.map((l) => JSON.stringify(l)).join("\n") + "\n");
+      }
+      const added = plan.append.length;
+      notes.push(
+        added > 0
+          ? `updated Codex session ${sessionId} from ${cliLabel(summary.source)} history (+${added} line${added === 1 ? "" : "s"}, ${summary.turnCount} turns)`
+          : `Codex session ${sessionId} is already up to date with ${cliLabel(summary.source)} history`,
+        `rollout file: ${path}`,
+      );
     } else {
       await writeFile(path, body, { mode: 0o600, flag: "wx" });
+      notes.push(
+        `fabricated Codex session ${sessionId} from ${cliLabel(summary.source)} history (${summary.turnCount} turns)`,
+        `rollout file: ${path} (${formatSize(transcriptSize(body))})`,
+      );
     }
-
-    notes.push(
-      `${existingPath ? "updated" : "fabricated"} Codex session ${sessionId} from ${cliLabel(summary.source)} history (${summary.turnCount} turns)`,
-      `rollout file: ${path} (${formatSize(transcriptSize(body))})`,
-    );
     const droppedModelNote = modelDropNote(summary);
     if (droppedModelNote) notes.push(droppedModelNote);
     const replayCount = eligibleReasoning(summary, opts.replayReasoning).length;

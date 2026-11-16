@@ -85,15 +85,27 @@ export async function readLineage(repo: RepoInfo, anyCommit = false): Promise<Li
     tool: "threadhop",
     ...(anyCommit ? {} : { reachableFrom: "HEAD" }),
   });
-  const parentOf = new Map<string, ContinuationRecord>();
-  const childrenOf = new Map<string, ContinuationRecord[]>();
+  // A copy updated in place is recorded again; its newest record is the one
+  // that says which source events the copy now holds, so it alone is kept.
+  const newest = new Map<string, ContinuationRecord>();
   for (const event of events) {
     const rec = parseRecord(event);
     if (!rec) continue;
+    const prior = newest.get(rec.target);
+    if (!prior || recordTime(rec) >= recordTime(prior)) newest.set(rec.target, rec);
+  }
+  const parentOf = new Map<string, ContinuationRecord>();
+  const childrenOf = new Map<string, ContinuationRecord[]>();
+  for (const rec of newest.values()) {
     parentOf.set(rec.target, rec);
     const list = childrenOf.get(rec.source);
     if (list) list.push(rec);
     else childrenOf.set(rec.source, [rec]);
   }
   return { parentOf, childrenOf };
+}
+
+function recordTime(rec: ContinuationRecord): number {
+  const time = Date.parse(rec.occurredAt);
+  return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
 }

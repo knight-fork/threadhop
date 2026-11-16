@@ -35,6 +35,14 @@ export interface TargetAdapter {
    * so callers must check this before asking for an update.
    */
   supportsUpdateInPlace?: boolean;
+  /**
+   * Whether a session this adapter fabricated is on this machine where a
+   * resume from `cwd` would find it. Present on adapters with
+   * `supportsUpdateInPlace`; callers use it before passing
+   * `existingSessionId`, because continuation records sync between machines
+   * and a session recorded elsewhere must never be recreated under its id.
+   */
+  hasSession?(sessionId: string, cwd: string): Promise<boolean>;
   isInstalled(): Promise<boolean>;
   /** Native resume for a conversation that originated in this CLI. */
   nativeResume(sessionId: string, cwd: string): LaunchPlan;

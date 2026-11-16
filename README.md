@@ -39,6 +39,7 @@ threadhop records --help    # shared cledger records maintenance commands
 #   --any-commit            include conversations from other branches/commits
 #   --bootstrap             force transcript rehydration instead of native fabrication
 #   --no-reasoning-replay   don't replay Codex-origin encrypted reasoning blobs
+#   --new-copy              always create a separate session (see "Bridging again" below)
 
 # optional: make bare `claude --resume` / `codex resume` open the merged picker
 threadhop shim install
@@ -72,6 +73,13 @@ Same-CLI selections use exact native resume when implemented; Aider and Continue
 target-native session file and hand off to the target's own resume; when that
 is unsupported for the installed CLI version, threadhop falls back to a fresh
 session bootstrapped with the literal transcript.
+
+**Bridging again.** Resuming a conversation into Claude Code or Codex a second
+time brings the copy made last time up to date instead of adding another
+session to that CLI's picker. A copy is only reused when it is on this machine
+(for Claude Code, written from the same directory) and you have not typed in
+it; a copy you continued is your own branch, so it is left exactly as it is and
+a new copy is made. `--new-copy` always makes a separate session.
 
 opencode works in both directions as of conversation-ledger 0.18.0, which
 captures it via a `session.idle` plugin rather than a shell hook. Two things

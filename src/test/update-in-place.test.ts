@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RepoInfo } from "conversation-ledger";
 import { listConversations } from "../conversations.js";
+import { readLineage, recordContinuation } from "../lineage.js";
+import { buildPlan, type PlanOptions } from "../resume.js";
 import { stableUuid } from "../stable-id.js";
 import {
   buildSessionLines,
@@ -14,7 +16,7 @@ import {
   planSessionAppend,
   type FabricatedLine,
 } from "../targets/claude-code.js";
-import { buildRolloutLines, codexTarget, rolloutDivergence } from "../targets/codex.js";
+import { buildRolloutLines, codexTarget, planRolloutAppend } from "../targets/codex.js";
 import { MirrorDivergedError, type TargetAdapter } from "../targets/types.js";
 import type { ConversationSummary } from "../types.js";
 import { cleanupRepo, makeTempRepo, seedConversation, type TurnSpec } from "./helpers.js";
@@ -108,6 +110,10 @@ function resumedChain(body: string): string[] {
     walked.unshift(line.uuid!);
   }
   return walked;
+}
+
+function reasonOf(plan: { reason: string } | { append: unknown[] }): string {
+  return "reason" in plan ? plan.reason : "";
 }
 
 function sessionIdOf(id: string | undefined): string {
@@ -249,12 +255,12 @@ test("codex: rebuilding the same history reproduces every history line", async (
     const once = buildRolloutLines(summary, sid, CWD, "0.146.0", NOW, false);
     const again = buildRolloutLines(summary, sid, CWD, "0.146.0", new Date(), false);
     const body = once.map((l) => JSON.stringify(l)).join("\n") + "\n";
-    assert.equal(rolloutDivergence(body, again, sid), null);
-    assert.match(rolloutDivergence(body, again, "77777777-7777-4777-8777-777777777777") ?? "", /session_meta/);
+    assert.deepEqual(planRolloutAppend(body, again, sid), { append: [] });
+    assert.match(reasonOf(planRolloutAppend(body, again, "77777777-7777-4777-8777-777777777777")), /session_meta/);
   });
 });
 
-test("codex: fabricate with existingSessionId rewrites the original rollout file", async () => {
+test("codex: fabricate with existingSessionId appends to the original rollout file", async () => {
   await withSandbox(async (box) => {
     const first = await codexTarget.fabricate(await box.summary(), CWD, { replayReasoning: false });
     const sid = sessionIdOf(first.fabricatedConversationId);
@@ -298,4 +304,171 @@ test("only adapters that rewrite in place advertise it", async () => {
     .map((t) => t.name)
     .sort();
   assert.deepEqual(advertised, ["claude-code", "codex"]);
+});
+
+test("adapters that rewrite in place can say whether a session is on this machine", async () => {
+  const { targets } = await import("../targets/index.js");
+  for (const target of Object.values(targets as Record<string, TargetAdapter>)) {
+    if (target.supportsUpdateInPlace) assert.equal(typeof target.hasSession, "function", target.name);
+  }
+});
+
+/** One `threadhop resume` of SOURCE into `target`, reading lineage fresh as resume does. */
+async function bridge(box: Sandbox, target: TargetAdapter, options: PlanOptions = {}, cwd = CWD) {
+  const conversations = await listConversations(box.repo, { all: true });
+  const source = conversations.find((c) => c.id === SOURCE);
+  assert.ok(source);
+  const lineage = await readLineage(box.repo);
+  return buildPlan(box.repo, target, source, cwd, false, lineage, conversations, false, options);
+}
+
+const TYPED_AFTER_RESUME =
+  JSON.stringify({ type: "user", uuid: "typed-after-resume", message: { role: "user", content: "next" } }) + "\n";
+
+test("resume: bridging again updates the earlier untouched copy and records what it now holds", async () => {
+  await withSandbox(async (box) => {
+    const first = await bridge(box, claudeCodeTarget);
+    const sid = sessionIdOf(first.fabricatedConversationId);
+    // opened and closed in Claude, with nothing typed
+    await appendFile(await claudeSessionFile(box, sid), claudeOpenRecords(sid));
+    await seedConversation(box.repo, SOURCE, "opencode", MORE);
+
+    const second = await bridge(box, claudeCodeTarget);
+    assert.equal(second.fabricatedConversationId, first.fabricatedConversationId);
+    assert.match(second.notes.join("\n"), /reusing the Claude Code copy made .* instead of creating another/);
+    const files = await readdir(join(box.claudeDir, "projects", encodeProjectDir(CWD)));
+    assert.deepEqual(files, [`${sid}.jsonl`], "no second copy in the picker");
+
+    const lineage = await readLineage(box.repo);
+    assert.equal(lineage.childrenOf.get(SOURCE)?.length, 1, "one copy, recorded once");
+    const record = lineage.parentOf.get(`claude-code:${sid}`);
+    assert.equal(record?.importedThroughSeq, 3, "the newest record wins");
+    assert.deepEqual(record?.sourceEventIds, second.importedSourceEventIds);
+    assert.ok((second.importedSourceEventIds?.length ?? 0) > (first.importedSourceEventIds?.length ?? 0));
+  });
+});
+
+test("resume: a copy the user typed in is left untouched and a new copy is made", async () => {
+  await withSandbox(async (box) => {
+    const first = await bridge(box, claudeCodeTarget);
+    const path = await claudeSessionFile(box, sessionIdOf(first.fabricatedConversationId));
+    await appendFile(path, TYPED_AFTER_RESUME);
+    const before = await readFile(path, "utf8");
+    await seedConversation(box.repo, SOURCE, "opencode", MORE);
+
+    const second = await bridge(box, claudeCodeTarget);
+    assert.notEqual(second.fabricatedConversationId, first.fabricatedConversationId);
+    assert.match(second.notes.join("\n"), /not reusing the earlier Claude Code copy: .*continued after resuming/);
+    assert.equal(await readFile(path, "utf8"), before);
+
+    // the new copy is the one a later bridge brings up to date
+    const third = await bridge(box, claudeCodeTarget);
+    assert.equal(third.fabricatedConversationId, second.fabricatedConversationId);
+  });
+});
+
+test("resume: --new-copy always makes a separate session", async () => {
+  await withSandbox(async (box) => {
+    const first = await bridge(box, claudeCodeTarget);
+    const second = await bridge(box, claudeCodeTarget, { newCopy: true });
+    assert.notEqual(second.fabricatedConversationId, first.fabricatedConversationId);
+    assert.doesNotMatch(second.notes.join("\n"), /reusing/);
+    assert.equal((await readdir(join(box.claudeDir, "projects", encodeProjectDir(CWD)))).length, 2);
+  });
+});
+
+test("resume: a copy recorded on another machine is never recreated under its id", async () => {
+  await withSandbox(async (box) => {
+    const elsewhere = "claude-code:66666666-6666-4666-8666-666666666666";
+    await recordContinuation(box.repo, {
+      source: SOURCE,
+      target: elsewhere,
+      importedThroughSeq: 1,
+      sourceEventIds: [],
+      targetCli: "claude-code",
+      version: "test",
+    });
+    const plan = await bridge(box, claudeCodeTarget);
+    assert.notEqual(plan.fabricatedConversationId, elsewhere);
+    assert.doesNotMatch(plan.notes.join("\n"), /reusing/);
+  });
+});
+
+test("resume: a Claude copy written from another directory is not reused", async () => {
+  await withSandbox(async (box) => {
+    const first = await bridge(box, claudeCodeTarget);
+    const second = await bridge(box, claudeCodeTarget, {}, `${CWD}/packages/api`);
+    assert.notEqual(second.fabricatedConversationId, first.fabricatedConversationId);
+  });
+});
+
+test("resume: bridging into Codex again updates the earlier rollout", async () => {
+  await withSandbox(async (box) => {
+    const first = await bridge(box, codexTarget);
+    await seedConversation(box.repo, SOURCE, "opencode", MORE);
+    const second = await bridge(box, codexTarget);
+    assert.equal(second.fabricatedConversationId, first.fabricatedConversationId);
+    assert.match(second.notes.join("\n"), /reusing the Codex copy/);
+    const rollouts = await codexRollouts(box.codexHome);
+    assert.equal(rollouts.length, 1);
+    assert.match(await readFile(rollouts[0]!, "utf8"), /binds port 0/);
+  });
+});
+
+/** What Codex 0.169.0 appended to a fabricated rollout when it was opened and closed with nothing typed. */
+function codexOpenRecord(sid: string): string {
+  return JSON.stringify({
+    timestamp: "2026-11-16T08:01:39.527Z",
+    type: "event_msg",
+    payload: {
+      type: "thread_settings_applied",
+      thread_id: sid,
+      thread_settings: { model: "gpt-5.4", model_provider_id: "openai", approval_policy: "never" },
+    },
+  }) + "\n";
+}
+
+test("codex: records Codex writes on open are kept and the update appends after them", async () => {
+  await withSandbox(async (box) => {
+    const first = await codexTarget.fabricate(await box.summary(), CWD, { replayReasoning: false });
+    const sid = sessionIdOf(first.fabricatedConversationId);
+    const [path] = await codexRollouts(box.codexHome);
+    assert.ok(path);
+    await appendFile(path, codexOpenRecord(sid));
+    const opened = await readFile(path, "utf8");
+    await seedConversation(box.repo, SOURCE, "opencode", MORE);
+
+    const second = await codexTarget.fabricate(await box.summary(), CWD, { replayReasoning: false, existingSessionId: sid });
+    assert.match(second.notes.join("\n"), /^updated Codex session .*\+\d+ lines/m);
+    const after = await readFile(path, "utf8");
+    assert.ok(after.startsWith(opened), "everything already in the file, Codex's record included, stays in place");
+    assert.match(after.slice(opened.length), /binds port 0/);
+    assert.deepEqual(await codexRollouts(box.codexHome), [path]);
+
+    const third = await codexTarget.fabricate(await box.summary(), CWD, { replayReasoning: false, existingSessionId: sid });
+    assert.match(third.notes.join("\n"), /already up to date/);
+    assert.equal(await readFile(path, "utf8"), after, "nothing new, nothing written");
+  });
+});
+
+test("codex: an unrecognised record Codex added still counts as divergence", async () => {
+  await withSandbox(async (box) => {
+    const sid = "88888888-8888-4888-8888-888888888888";
+    const lines = buildRolloutLines(await box.summary(), sid, CWD, "0.169.0", NOW, false);
+    const body = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+    const unknown = JSON.stringify({ timestamp: NOW.toISOString(), type: "event_msg", payload: { type: "token_count" } }) + "\n";
+    assert.match(reasonOf(planRolloutAppend(body + unknown, lines, sid)), /did not write/);
+    assert.deepEqual(planRolloutAppend(body + codexOpenRecord(sid), lines, sid), { append: [] });
+  });
+});
+
+test("codex: a copy whose import notice would now differ is refused rather than left stale", async () => {
+  await withSandbox(async (box) => {
+    const sid = "99999999-9999-4999-8999-999999999999";
+    const lines = buildRolloutLines(await box.summary(), sid, CWD, "0.169.0", NOW, false);
+    const older = structuredClone(lines) as Array<{ payload: { message?: string } }>;
+    older[1]!.payload.message += " 3 encrypted reasoning block(s) were replayed.";
+    const body = older.map((l) => JSON.stringify(l)).join("\n") + "\n";
+    assert.match(reasonOf(planRolloutAppend(body, lines, sid)), /import notice/);
+  });
 });

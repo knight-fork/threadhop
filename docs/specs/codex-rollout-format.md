@@ -472,3 +472,29 @@ Nothing in §§1–9 required amendment. The unmeasured items stay unmeasured fo
 as before: `custom_tool_call` fabrication, histories beyond ~300 turns, and blob TTL for
 encrypted-reasoning replay (§8.6 / the roadmap's reasoning-replay entry) — none of which this
 release touched.
+
+## 11. Opening a session writes to it — codex-cli 0.169.0 (2026-11-16)
+
+Measured with `scripts/probe-codex-update-in-place.mjs` against a live 0.169.0 install in an
+isolated `HOME`/`CODEX_HOME` (fake key, unreachable provider; no turn submitted, nothing sent).
+
+| step | observed |
+|---|---|
+| fabricate a two-turn rollout, `codex resume <id>`, wait for the history to render, `/exit` | history rendered; Codex **appended one line**: `event_msg` / `thread_settings_applied` (thread id plus the model, provider and approval settings the session opened with). Every line threadhop wrote was left byte-identical as a prefix. |
+| update the same session in place with two more source turns | appended after Codex's record; same file, no second rollout |
+| `codex resume <id>` again | both the original and the appended turns rendered, in order; Codex appended nothing this time (settings unchanged) |
+
+Consequences for update-in-place (`planRolloutAppend` in `src/targets/codex.ts`):
+
+- `thread_settings_applied` is allowlisted as a record Codex writes on open; it is kept in place,
+  not treated as the user continuing the session. Any other unrecognised line still counts as
+  divergence, so a future release that writes something new on open makes threadhop create a new
+  copy rather than risk appending past a user's turns.
+- The update **appends** rather than rewriting the file, mirroring the Claude Code adapter: a Codex
+  process with the session open keeps writing to the same file, never to a replaced inode.
+- Because an append cannot change the header, a copy whose import notice would now read
+  differently (a changed replayed-reasoning count) is refused and a new copy is made.
+
+Fabrication itself also still loads on 0.169.0 (the history rendered in the real TUI), but the
+validated prefixes in `src/targets/codex.ts` were **not** advanced: that still needs the full
+§10-style revalidation (content recall, function-call, large-history and interactive probes).

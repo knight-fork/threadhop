@@ -23,6 +23,8 @@ Options for resume/list:
   --no-reasoning-replay
                 don't replay Codex-origin encrypted reasoning blobs when
                 fabricating back into Codex (default: replay them)
+  --new-copy    create a separate session in the target even when an earlier
+                copy you haven't typed in could be updated (Claude Code, Codex)
 `;
 
 const RECORD_ALIASES = new Map([
@@ -86,6 +88,7 @@ async function main(argv: string[]): Promise<number> {
       else if (arg === "--any-commit") flags.anyCommit = true;
       else if (arg === "--bootstrap") flags.bootstrap = true;
       else if (arg === "--no-reasoning-replay") flags.noReasoningReplay = true;
+      else if (arg === "--new-copy") flags.newCopy = true;
       else if (!arg.startsWith("-")) {
         const target = parseCliName(arg);
         if (!target) {

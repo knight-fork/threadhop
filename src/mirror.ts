@@ -1,4 +1,5 @@
-import { findRepo, gitUserIdentity, type RepoInfo } from "conversation-ledger";
+import { loadConfig as loadLedgerConfig } from "annals";
+import { asLedger, findRepo, gitUserIdentity, type RepoInfo } from "conversation-ledger";
 import { reconcileBootstrapContinuations } from "./bootstrap-lineage.js";
 import { loadConfig } from "./config.js";
 import { listConversations } from "./conversations.js";
@@ -6,6 +7,7 @@ import { fabricateCopy, historyFor, recordCopy, reusableCopies } from "./copies.
 import { withLedgerNotices } from "./ledger-io.js";
 import { readLineage } from "./lineage.js";
 import { isUntouchedCopy } from "./lineage-resolution.js";
+import { withMirrorLock } from "./mirror-lock.js";
 import { targetFor } from "./targets/index.js";
 import { FabricationUnsupportedError, type TargetAdapter } from "./targets/types.js";
 import { cliLabel, parseCliName, relativeTime, type ConversationSummary } from "./types.js";
@@ -20,6 +22,11 @@ export interface MirrorOptions {
   dryRun?: boolean;
   anyCommit?: boolean;
   replayReasoning: boolean;
+  /**
+   * Mirror only these sessions (an automatic run mirrors the one that just
+   * changed), still subject to every other rule; `limit` does not apply.
+   */
+  only?: { source: string; sessionId: string }[];
 }
 
 export type MirrorAction =
@@ -64,13 +71,29 @@ export function mirrorCandidates(
  * background mirror must not do.
  */
 export async function runMirror(repo: RepoInfo, cwd: string, options: MirrorOptions): Promise<MirrorResult[]> {
+  // With capture switched off, the record of each copy is dropped too, so the
+  // next run could not find the copy again and would make another one.
+  if ((await loadLedgerConfig(asLedger(repo))).enabled === false) {
+    throw new Error(
+      `conversation-ledger is turned off for ${repo.root} (.cledger.json), so threadhop can't record ` +
+        "the copies it makes and would add new ones on every run; nothing was mirrored",
+    );
+  }
   if (!options.dryRun) await reconcileBootstrapContinuations(repo);
   const anyCommit = options.anyCommit ?? false;
   const [conversations, lineage] = await withLedgerNotices(async () => {
     const all = await listConversations(repo, { all: true, anyCommit });
     return [all, await readLineage(repo, anyCommit)] as const;
   });
-  const candidates = mirrorCandidates(conversations, lineage, options.self, options.limit);
+  const only = options.only;
+  const candidates = only
+    ? mirrorCandidates(
+        conversations.filter((c) => only.some((o) => c.source === o.source && c.sessionId === o.sessionId)),
+        lineage,
+        options.self,
+        Number.POSITIVE_INFINITY,
+      )
+    : mirrorCandidates(conversations, lineage, options.self, options.limit);
 
   const results: MirrorResult[] = [];
   for (const conversation of candidates) {
@@ -158,6 +181,37 @@ export function renderMirrorResults(results: MirrorResult[], cwd: string, dryRun
   return [...lines, ...(notes.length ? ["", "notes:", ...notes.map((n) => `  - ${n}`)] : []), "", footer, ""].join("\n");
 }
 
+/**
+ * The adapters for `names`, or why they can't be mirrored into. Only targets
+ * that update a copy in place qualify: any other would gain a new session in
+ * its picker on every run.
+ */
+export async function resolveMirrorTargets(names: string[]): Promise<{ targets: TargetAdapter[] } | { error: string }> {
+  if (names.length === 0) {
+    return {
+      error:
+        "name the CLIs to keep copies in, e.g. `threadhop mirror codex claude`,\n" +
+        '  or set them once in ~/.threadhop/config.json: {"mirror": {"targets": ["codex", "claude-code"]}}',
+    };
+  }
+  const targets: TargetAdapter[] = [];
+  for (const name of names) {
+    const cli = parseCliName(name);
+    if (!cli) return { error: `unknown target CLI: ${name}` };
+    const target = targetFor(cli);
+    if (!target.supportsUpdateInPlace) {
+      return {
+        error:
+          `${cliLabel(cli)} can't update a copy in place yet, so mirroring would add a new ` +
+          "session to its picker on every run; supported: Claude Code, Codex",
+      };
+    }
+    if (!(await target.isInstalled())) return { error: `${target.binary} is not on PATH` };
+    if (!targets.includes(target)) targets.push(target);
+  }
+  return { targets };
+}
+
 export interface MirrorFlags {
   targets: string[];
   limit?: number;
@@ -179,43 +233,25 @@ export async function mirrorCommand(flags: MirrorFlags): Promise<number> {
   }
   const config = await loadConfig();
   const names = flags.targets.length > 0 ? flags.targets : config.mirror?.targets ?? [];
-  if (names.length === 0) {
-    process.stderr.write(
-      "threadhop mirror: name the CLIs to keep copies in, e.g. `threadhop mirror codex claude`,\n" +
-        '  or set them once in ~/.threadhop/config.json: {"mirror": {"targets": ["codex", "claude-code"]}}\n',
-    );
+  const resolved = await resolveMirrorTargets(names);
+  if ("error" in resolved) {
+    process.stderr.write(`threadhop mirror: ${resolved.error}\n`);
     return 1;
   }
-  const targets: TargetAdapter[] = [];
-  for (const name of names) {
-    const cli = parseCliName(name);
-    if (!cli) {
-      process.stderr.write(`threadhop mirror: unknown target CLI: ${name}\n`);
-      return 1;
-    }
-    const target = targetFor(cli);
-    if (!target.supportsUpdateInPlace) {
-      process.stderr.write(
-        `threadhop mirror: ${cliLabel(cli)} can't update a copy in place yet, so mirroring would add a new ` +
-          "session to its picker on every run; supported: Claude Code, Codex\n",
-      );
-      return 1;
-    }
-    if (!(await target.isInstalled())) {
-      process.stderr.write(`threadhop mirror: ${target.binary} is not on PATH\n`);
-      return 1;
-    }
-    if (!targets.includes(target)) targets.push(target);
-  }
+  const targets = resolved.targets;
   const limit = flags.limit ?? config.mirror?.limit ?? DEFAULT_MIRROR_LIMIT;
-  const results = await runMirror(repo, cwd, {
+  const options: MirrorOptions = {
     targets,
     self,
     limit,
     dryRun: flags.dryRun ?? false,
     anyCommit: flags.anyCommit ?? false,
     replayReasoning: config.reasoningReplay !== false,
-  });
+  };
+  // A dry run writes nothing, so it need not wait for an automatic run.
+  const results = options.dryRun
+    ? await runMirror(repo, cwd, options)
+    : await withMirrorLock(repo, () => runMirror(repo, cwd, options));
   process.stdout.write(renderMirrorResults(results, cwd, flags.dryRun ?? false));
   return results.some((r) => r.action === "unsupported") ? 1 : 0;
 }

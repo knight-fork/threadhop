@@ -2,6 +2,7 @@
 import { runRecordsCommand } from "annals";
 import { asLedger, findRepo } from "conversation-ledger";
 import { mirrorCommand, type MirrorFlags } from "./mirror.js";
+import { disableCommand, enableCommand, isTriggerSource, runTriggered, statusCommand, triggerCommand } from "./auto-mirror.js";
 import { resumeCommand, type ResumeFlags } from "./resume.js";
 import { shimInstall, shimStatus, shimUninstall } from "./shim.js";
 import { parseCliName } from "./types.js";
@@ -14,6 +15,8 @@ Usage:
   threadhop list [options]                            print compatible conversations
   threadhop mirror [target-cli...] [options]          keep copies of your recent conversations
                                                        in other CLIs' own resume pickers
+  threadhop mirror enable [target-cli...]             do that automatically after every turn
+  threadhop mirror disable|status                     turn it off, or see what it has done
   threadhop targets [--json]                          show implemented target routes
   threadhop shim install|uninstall|status             opt-in \`claude --resume\` interception
   threadhop records <command>                         maintain shared cledger records
@@ -67,6 +70,32 @@ async function recordsCommand(argv: string[]): Promise<number> {
   });
 }
 
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * Run by a CLI's own Stop/SessionEnd hook (installed by `mirror enable`);
+ * with --worker, the detached background run it starts.
+ */
+async function mirrorTrigger(args: string[]): Promise<number> {
+  const source = args[0] ?? "";
+  if (!args.includes("--worker")) return triggerCommand(source, await readStdin());
+  const value = (name: string) => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : undefined;
+  };
+  const transcriptPath = value("--transcript");
+  const cwd = value("--cwd");
+  const sessionId = value("--session");
+  if (!isTriggerSource(source) || !transcriptPath || !cwd) return 0;
+  await runTriggered({ source, transcriptPath, cwd, ...(sessionId ? { sessionId } : {}) });
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const args = [...argv];
   const command = args.shift();
@@ -112,7 +141,26 @@ async function main(argv: string[]): Promise<number> {
     return resumeCommand(flags);
   }
 
+  if (command === "mirror-trigger") return mirrorTrigger(args);
+
   if (command === "mirror") {
+    const sub = args[0];
+    if (sub === "enable") {
+      const names = args.slice(1);
+      const option = names.find((arg) => arg.startsWith("-"));
+      if (option) {
+        process.stderr.write(`threadhop: unknown option: ${option}\n`);
+        return 1;
+      }
+      return enableCommand(names);
+    }
+    if (sub === "disable" || sub === "status") {
+      if (args.length > 1) {
+        process.stderr.write(`threadhop mirror ${sub} takes no arguments\n`);
+        return 1;
+      }
+      return sub === "disable" ? disableCommand() : statusCommand();
+    }
     const flags: MirrorFlags = { targets: [] };
     for (let i = 0; i < args.length; i++) {
       const arg = args[i]!;

@@ -18,6 +18,11 @@ export interface ThreadhopConfig {
     targets?: string[];
     /** How many of your most recent conversations to mirror. */
     limit?: number;
+    /**
+     * Mirror automatically after every turn (set by `threadhop mirror enable`,
+     * which also installs the hooks that do it).
+     */
+    auto?: boolean;
   };
 }
 

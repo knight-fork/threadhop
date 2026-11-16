@@ -5,6 +5,7 @@ import { writeBootstrapTranscript } from "./bootstrap.js";
 import { loadConfig, saveConfig } from "./config.js";
 import { listConversations } from "./conversations.js";
 import { fabricateCopy, historyFor, recordCopy } from "./copies.js";
+import { withMirrorLock } from "./mirror-lock.js";
 import { readLineage, type Lineage } from "./lineage.js";
 import { runInteractiveLaunchPlan } from "./interactive-launch.js";
 import { withLedgerNotices } from "./ledger-io.js";
@@ -113,16 +114,20 @@ export async function buildPlan(
   let nativeImportFallback: LaunchPlan["nativeImportFallback"];
   if (!useBootstrap) {
     try {
-      // Resume is about to open the session, so a new copy beats none at all.
-      const { plan, reused } = await fabricateCopy(target, summary, history.summary, lineage, cwd, replayReasoning, {
-        newCopy: options.newCopy ?? false,
-        whenAllContinued: "create",
+      // Held while the copy is written and recorded, so an automatic mirror
+      // run can't append to the same copy at the same time.
+      return await withMirrorLock(repo, async () => {
+        // Resume is about to open the session, so a new copy beats none at all.
+        const { plan, reused } = await fabricateCopy(target, summary, history.summary, lineage, cwd, replayReasoning, {
+          newCopy: options.newCopy ?? false,
+          whenAllContinued: "create",
+        });
+        if (!plan) throw new Error("fabricateCopy skipped despite whenAllContinued: create");
+        if (reused) plan.notes.push("--new-copy makes a separate session instead");
+        plan.notes.push(...history.notes);
+        await recordCopy(repo, target, summary, plan);
+        return plan;
       });
-      if (!plan) throw new Error("fabricateCopy skipped despite whenAllContinued: create");
-      if (reused) plan.notes.push("--new-copy makes a separate session instead");
-      plan.notes.push(...history.notes);
-      await recordCopy(repo, target, summary, plan);
-      return plan;
     } catch (err) {
       if (!(err instanceof FabricationUnsupportedError)) throw err;
       nativeImportFallback = { kind: err.kind, reason: err.message };

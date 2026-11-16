@@ -31,6 +31,7 @@ threadhop resume opencode   # resume straight into opencode
 threadhop resume qwen       # native visible-text import where format supported
 threadhop resume gemini     # transcript bootstrap
 threadhop mirror codex claude   # keep your recent conversations in these CLIs' own pickers
+threadhop mirror enable codex claude   # ...automatically, after every turn
 threadhop targets           # list implemented routes for all twenty targets
 threadhop list              # print compatible conversations
 threadhop records --help    # shared cledger records maintenance commands
@@ -104,6 +105,42 @@ Copies are filed for the directory mirror runs in, which is where those CLIs'
 pickers look. `--dry-run` shows what would be created or updated. Targets and
 limit can be set once in `~/.threadhop/config.json`:
 `{"mirror": {"targets": ["codex", "claude-code"], "limit": 10}}`.
+
+**Automatic mirroring.** `threadhop mirror enable codex claude` does the same
+after every turn, with nothing to run by hand:
+
+```sh
+cledger install claude-code && cledger install codex   # capture comes first
+threadhop mirror enable codex claude
+threadhop mirror status    # hooks installed, and what recent runs did
+threadhop mirror disable   # removes the hooks; copies made so far stay
+```
+
+`enable` adds a `threadhop mirror-trigger <cli>` hook next to cledger's in each
+CLI that has somewhere else to send its conversations (`~/.claude/settings.json`,
+`~/.codex/config.toml`, each backed up first). It refuses, changing nothing,
+until cledger captures that CLI. Codex asks you to approve a new hook once:
+open `codex`, run `/hooks` and approve it. Claude Code picks the hook up
+without a restart, including in sessions already open.
+
+After each turn, the trigger hands the session to a background worker and
+returns at once, so the CLI never waits on it. The worker captures that
+session itself (cledger's hook runs alongside and may not have finished),
+then mirrors that one conversation under all of the rules above, into the
+folder the session ran in. Runs in one repository never overlap: a lock under
+`.git/threadhop/` makes back-to-back triggers (a turn's Stop, then
+SessionEnd, or several sessions at once) wait and then fold into one run, and
+`threadhop resume` and a manual `threadhop mirror` take the same lock.
+Each run's result is appended to `~/.threadhop/mirror.log`. Earlier
+conversations are copied the next time they change; run `threadhop mirror`
+once in a repository to copy its recent ones now. Mirroring refuses to run in
+a repository where cledger is turned off (`.cledger.json` `{"enabled": false}`),
+because it couldn't record its copies and would make new ones every time.
+
+One gap to know about: a copy that is open in its CLI, not yet typed in, is
+still brought up to date on disk when the original changes, but the open
+session doesn't see those turns. Reopen it before typing; if you type first,
+the copy's file holds turns that session never saw.
 
 opencode works in both directions as of conversation-ledger 0.18.0, which
 captures it via a `session.idle` plugin rather than a shell hook. Two things

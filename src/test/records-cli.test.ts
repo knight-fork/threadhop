@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,11 @@ function run(cwd: string, args: string[]) {
 
 test("records CLI uses cledger's exact namespace and does not add transport wiring", async () => {
   const repo = await makeTempRepo("threadhop-records-namespace-");
+  // The first capture wires up transport unless ~/.config/cledger/config.json
+  // opts out; a private HOME keeps the developer's own settings out of this.
+  const savedHome = process.env["HOME"];
+  const home = await mkdtemp(join(tmpdir(), "threadhop-records-home-"));
+  process.env["HOME"] = home;
   try {
     const ledger = asLedger(repo);
     assert.equal(ledger.ns.name, "conversation-ledger");
@@ -64,6 +70,9 @@ test("records CLI uses cledger's exact namespace and does not add transport wiri
     assert.equal(await readFile(hookPath, "utf8"), hookBefore);
     assert.equal(await git(["config", "--get-all", "remote.origin.fetch"], { cwd: repo.root }), fetchBefore);
   } finally {
+    if (savedHome === undefined) delete process.env["HOME"];
+    else process.env["HOME"] = savedHome;
+    await rm(home, { recursive: true, force: true });
     await cleanupRepo(repo);
   }
 });

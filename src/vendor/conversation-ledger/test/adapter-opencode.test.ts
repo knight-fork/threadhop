@@ -1,0 +1,598 @@
+import { test } from "node:test";
+import assert from "node:assert";
+import { mkdir, writeFile } from "node:fs/promises";
+import { delimiter, join } from "node:path";
+import {
+  captureOpencodeExport,
+  runOpencodeHook,
+  renormalizeUnrecognized,
+  type OpencodeExport,
+} from "../adapters/opencode.js";
+import { readEvents } from "../store.js";
+import { writeCursor } from "../adapters/common.js";
+import { eventId, type EvidenceEvent } from "../schema.js";
+import { cleanupRepo, makeCommit, makeTempRepo } from "./helpers.js";
+
+const SESSION_ID = "ses_test000000000000000000000";
+const SESSION_CREATED = 1785583070532; // 2026-08-01T...Z, epoch ms as opencode stores it
+
+test("OpenCode 1.18.10 Part union: all 12 variants normalize and retain native fields", async () => {
+  // Source contract, also checked against dev on 2026-09-28:
+  // https://github.com/anomalyco/opencode/blob/v1.18.10/packages/schema/src/v1/session.ts
+  // Todos are tool calls, not a thirteenth Part variant:
+  // https://github.com/anomalyco/opencode/blob/v1.18.10/packages/opencode/src/tool/todo.ts
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    const todos = [{ content: "Verify adapter", status: "in_progress", priority: "high" }];
+    const source = { type: "file", path: "/tmp/note.txt", text: { value: "@note.txt", start: 0, end: 9 } };
+    const file = { type: "file", mime: "text/plain", filename: "note.txt", url: "file:///tmp/note.txt", source };
+    const variants = [
+      { type: "text", text: "", metadata: { structural: true } },
+      { type: "reasoning", text: "Consider the task", time: { start: SESSION_CREATED + 1 }, metadata: { provider: "example" } },
+      { type: "tool", tool: "todowrite", callID: "call_todo", state: {
+        status: "completed", input: { todos }, output: JSON.stringify(todos), title: "1 todo",
+        metadata: { todos }, time: { start: SESSION_CREATED + 2, end: SESSION_CREATED + 3 }, attachments: [file],
+      } },
+      { type: "step-start", snapshot: "snapshot-before" },
+      { type: "step-finish", snapshot: "snapshot-after", reason: "stop", cost: 0.001,
+        tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } } },
+      { type: "patch", hash: "patch-ref", files: ["note.txt"] },
+      file,
+      { type: "agent", name: "explore", source: { value: "@explore", start: 0, end: 8 } },
+      { type: "snapshot", snapshot: "snapshot-ref" },
+      { type: "subtask", prompt: "Inspect the project", description: "Project exploration", agent: "explore",
+        model: { providerID: "example", modelID: "example-model" }, command: "inspect" },
+      { type: "retry", attempt: 2, error: { name: "APIError", data: { message: "Please retry", isRetryable: true } },
+        time: { created: SESSION_CREATED + 4000 } },
+      { type: "compaction", auto: true, overflow: true, tail_start_id: "msg_retained" },
+    ];
+    const kinds = ["conversation_turn", "conversation_turn", "conversation_turn", "activity", "activity", "activity",
+      "context_injection", "context_injection", "file_snapshot", "activity", "activity", "activity"];
+    const parts = variants.map((part, i) => ({ ...part, id: `prt_${i}`, messageID: "msg_contract", sessionID: SESSION_ID }));
+    const info = { id: "msg_contract", role: "assistant", agent: "build", time: { created: SESSION_CREATED } };
+    const data: OpencodeExport = { info: { id: SESSION_ID, version: "1.18.10", time: { created: SESSION_CREATED } },
+      messages: [{ info, parts }] };
+    const result = await captureOpencodeExport(data, repo.root);
+    assert.equal(result.appended, 12);
+    assert.deepEqual(result.unrecognized, {});
+    const events = (await readEvents(repo)).sort((a, b) => a.stream!.seq - b.stream!.seq);
+    assert.deepEqual(events.map((event) => event.kind), kinds);
+    for (let i = 0; i < parts.length; i++) {
+      assert.deepEqual(events[i]!.raw!.data, { info, part: parts[i] });
+      assert.equal(events[i]!.producer.source_version, "1.18.10");
+      const preserved = { ...events[i]!, kind: "unrecognized", content: { unrecognized_type: parts[i]!.type } } as EvidenceEvent;
+      const normalized = renormalizeUnrecognized(preserved, { name: "Test User", email: "test@example.com" });
+      assert.ok(normalized, `${parts[i]!.type} must re-normalize`);
+      assert.equal(eventId(normalized), events[i]!.id, `${parts[i]!.type} re-normalization has live-capture identity`);
+    }
+    const tool = events[2]!.content as { blocks: Record<string, unknown>[] };
+    assert.deepEqual(tool.blocks[0]!["input"], { todos });
+    assert.equal(tool.blocks[1]!["content"], JSON.stringify(todos));
+    assert.deepEqual(tool.blocks[1]!["attachments"], [file]);
+    assert.deepEqual((events[0]!.content as { blocks: unknown[] }).blocks, [{ type: "text", text: "" }]);
+    const snapshot = events[8]!.content as Record<string, unknown>;
+    assert.equal(snapshot["snapshot"], "snapshot-ref");
+    assert.equal(snapshot["operation"], "snapshot");
+    assert.equal("files" in snapshot, false, "a snapshot ref does not assert an empty file set");
+    assert.deepEqual((events[9]!.content as { blocks: unknown[] }).blocks, [{ type: "text", text: "Inspect the project" }]);
+    assert.equal(events[10]!.occurred_at, new Date(SESSION_CREATED + 4000).toISOString());
+    await writeCursor(repo, SESSION_ID, "parts", 0);
+    const replay = await captureOpencodeExport(data, repo.root);
+    assert.equal(replay.appended, 0);
+    assert.equal(replay.deduped, 12);
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("file/symbol/resource references, agent mentions and synthetic user text keep their provenance", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    const text = { value: "@reference", start: 0, end: 10 };
+    const sources = [
+      { type: "file", text, path: "/tmp/note.txt" },
+      { type: "symbol", text, path: "/tmp/note.ts", name: "helper", kind: 12,
+        range: { start: { line: 0, character: 0 }, end: { line: 1, character: 0 } } },
+      { type: "resource", text, clientName: "docs", uri: "example://reference" },
+    ];
+    const parts = [
+      ...sources.map((source, i) => ({ type: "file", id: `prt_${i}`, mime: "text/plain", url: "file:///tmp/note.txt", source })),
+      { type: "agent", id: "prt_3", name: "explore", source: { value: "@explore", start: 0, end: 8 } },
+      { type: "text", id: "prt_4", synthetic: true, text: "Harness-added context" },
+      { type: "todo", id: "prt_5", todos: [] },
+    ];
+    const info = { role: "user", time: { created: SESSION_CREATED } };
+    const data: OpencodeExport = { info: { id: SESSION_ID, time: { created: SESSION_CREATED } }, messages: [{ info, parts }] };
+    const result = await captureOpencodeExport(data, repo.root);
+    assert.deepEqual(result.unrecognized, { todo: 1 }, "do not invent a native todo Part schema");
+    const events = (await readEvents(repo)).sort((a, b) => a.stream!.seq - b.stream!.seq);
+    for (let i = 0; i < 4; i++) {
+      assert.equal(events[i]!.kind, "context_injection");
+      assert.deepEqual(events[i]!.actor, { type: "human", id: "test@example.com", display: "Test User" });
+      assert.deepEqual(events[i]!.raw!.data, { info, part: parts[i] });
+    }
+    assert.deepEqual(events[4]!.actor, { type: "system" });
+    assert.deepEqual(events[5]!.raw!.data, { info, part: parts[5] });
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+/**
+ * A session shaped like a real `opencode export`: a user message, then an
+ * assistant message mixing reasoning, text, a settled tool call, the
+ * bookkeeping parts that must be skipped, and one part type this adapter
+ * version does not know (which must be preserved raw-only, not dropped).
+ */
+function sessionExport(): OpencodeExport {
+  return {
+    info: {
+      id: SESSION_ID,
+      directory: "/tmp/whatever",
+      title: "Test session",
+      version: "1.18.5",
+      time: { created: SESSION_CREATED, updated: SESSION_CREATED + 9000 },
+    },
+    messages: [
+      {
+        info: {
+          id: "msg_user",
+          sessionID: SESSION_ID,
+          role: "user",
+          agent: "build",
+          model: { providerID: "ds4", modelID: "deepseek-v4-flash" },
+          time: { created: SESSION_CREATED + 1 },
+        },
+        // seq 0
+        parts: [{ id: "prt_0", type: "text", text: "Read note.txt please" }],
+      },
+      {
+        info: {
+          id: "msg_asst",
+          sessionID: SESSION_ID,
+          role: "assistant",
+          agent: "build",
+          modelID: "deepseek-v4-flash",
+          providerID: "ds4",
+          time: { created: SESSION_CREATED + 2, completed: SESSION_CREATED + 9000 },
+        },
+        parts: [
+          // seq 1 — a step boundary: recorded as `activity`, carrying the git
+          // snapshot hash nothing else in the export exposes
+          { id: "prt_1", type: "step-start", snapshot: "0d9b515140cdc80d" },
+          // seq 2 — plaintext reasoning becomes a visible thinking block
+          {
+            id: "prt_2",
+            type: "reasoning",
+            text: "They want the file read.",
+            time: { start: SESSION_CREATED + 3 },
+          },
+          // seq 3 — settled tool call: one event carrying call + result
+          {
+            id: "prt_3",
+            type: "tool",
+            tool: "read",
+            callID: "call_abc",
+            state: {
+              status: "completed",
+              input: { filePath: "/tmp/note.txt" },
+              output: "hello",
+              time: { start: SESSION_CREATED + 4 },
+            },
+          },
+          // seq 4 — still running: must not be captured, and must hold the cursor
+          {
+            id: "prt_4",
+            type: "tool",
+            tool: "bash",
+            callID: "call_running",
+            state: { status: "running", input: { command: "sleep 1" } },
+          },
+          // seq 5 — visible assistant text
+          { id: "prt_5", type: "text", text: "It says hello.", time: { start: SESSION_CREATED + 5 } },
+          // seq 6 — whitespace is preserved, including its structural role
+          { id: "prt_6", type: "text", text: "   " },
+          // seq 7 — unknown to this adapter version: preserved raw-only
+          { id: "prt_7", type: "some-future-part", text: "from a newer opencode" },
+          // seq 8 — the step's token accounting: `activity`, not a turn
+          { id: "prt_8", type: "step-finish", reason: "stop", tokens: { input: 10, output: 2 } },
+        ],
+      },
+    ],
+  };
+}
+
+test("captures visible parts, records step boundaries, preserves unknown part types", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    const result = await captureOpencodeExport(sessionExport(), repo.root);
+
+    assert.equal(
+      result.appended,
+      8,
+      "user text, two step boundaries, reasoning, tool, assistant text, empty text, unrecognized",
+    );
+    assert.deepEqual(result.unrecognized, { "some-future-part": 1 });
+
+    const events = await readEvents(repo);
+    const bySeq = new Map(events.map((e) => [e.stream?.seq, e]));
+
+    // Only the unsettled tool produces nothing.
+    for (const seq of [4]) {
+      assert.equal(bySeq.has(seq), false, `seq ${seq} should not be captured`);
+    }
+
+    // Step boundaries are `activity`, keeping their source fields verbatim.
+    assert.equal(bySeq.get(1)!.kind, "activity");
+    assert.deepEqual(bySeq.get(1)!.content, {
+      activity_type: "step-start",
+      id: "prt_1",
+      snapshot: "0d9b515140cdc80d",
+    });
+    assert.equal(bySeq.get(8)!.kind, "activity");
+    assert.deepEqual(bySeq.get(8)!.content, {
+      activity_type: "step-finish",
+      id: "prt_8",
+      reason: "stop",
+      tokens: { input: 10, output: 2 },
+    });
+
+    const user = bySeq.get(0)!;
+    assert.equal(user.kind, "conversation_turn");
+    assert.equal(user.actor.type, "human");
+    assert.equal(user.actor.id, "test@example.com");
+    assert.equal(user.producer.source, "opencode");
+    assert.equal(user.stream?.id, `opencode:${SESSION_ID}`);
+    // opencode states the model even on user messages, unlike claude-code.
+    assert.equal(user.producer.model, "deepseek-v4-flash");
+    assert.equal(user.producer.provider, "ds4");
+    assert.equal(user.producer.source_version, "1.18.5");
+    assert.deepEqual((user.content as { blocks: unknown[] }).blocks, [
+      { type: "text", text: "Read note.txt please" },
+    ]);
+    assert.equal((user.content as { agent?: string }).agent, "build");
+
+    // Reasoning is plaintext in opencode, so it is a normal visible turn —
+    // never the opaque `reasoning` kind codex needs.
+    const reasoning = bySeq.get(2)!;
+    assert.equal(reasoning.kind, "conversation_turn");
+    assert.equal(reasoning.actor.type, "agent");
+    assert.deepEqual((reasoning.content as { blocks: unknown[] }).blocks, [
+      { type: "thinking", text: "They want the file read." },
+    ]);
+
+    // A tool part carries call and result together in one event.
+    const tool = bySeq.get(3)!;
+    assert.equal(tool.actor.type, "agent");
+    const toolBlocks = (tool.content as { blocks: Record<string, unknown>[] }).blocks;
+    assert.equal(toolBlocks.length, 2);
+    assert.deepEqual(toolBlocks[0], {
+      type: "tool_use",
+      name: "read",
+      input: { filePath: "/tmp/note.txt" },
+      id: "call_abc",
+    });
+    assert.deepEqual(toolBlocks[1], {
+      type: "tool_result",
+      tool_use_id: "call_abc",
+      content: "hello",
+    });
+
+    const unknown = bySeq.get(7)!;
+    assert.equal(unknown.kind, "unrecognized");
+    assert.deepEqual(unknown.content, { unrecognized_type: "some-future-part" });
+    // raw pairs the part with its message info so the event stands alone.
+    const raw = unknown.raw?.data as { info?: { role?: string }; part?: { id?: string } };
+    assert.equal(raw.part?.id, "prt_7");
+    assert.equal(raw.info?.role, "assistant");
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("occurred_at falls back from part to message to session time", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    await captureOpencodeExport(sessionExport(), repo.root);
+    const events = await readEvents(repo);
+    const bySeq = new Map(events.map((e) => [e.stream?.seq, e]));
+    // seq 0's part has no time of its own, so it takes the message's.
+    assert.equal(bySeq.get(0)!.occurred_at, new Date(SESSION_CREATED + 1).toISOString());
+    // seq 2's part states its own start time.
+    assert.equal(bySeq.get(2)!.occurred_at, new Date(SESSION_CREATED + 3).toISOString());
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("re-capturing is idempotent, and an unsettled tool call is picked up once it settles", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    const first = await captureOpencodeExport(sessionExport(), repo.root);
+    assert.equal(first.appended, 8);
+
+    // Same export again: the cursor was held at the running tool part, so
+    // everything after it is re-examined and must dedup rather than duplicate.
+    const second = await captureOpencodeExport(sessionExport(), repo.root);
+    assert.equal(second.appended, 0);
+    assert.ok(second.deduped > 0, "re-scanned parts should dedup");
+
+    // The tool call finishes; only that one new event should appear.
+    const settled = sessionExport();
+    const running = settled.messages![1]!.parts![3]!; // seq 4, the running tool
+    running.state = { status: "completed", input: { command: "sleep 1" }, output: "done" };
+    const third = await captureOpencodeExport(settled, repo.root);
+    assert.equal(third.appended, 1);
+
+    const events = await readEvents(repo);
+    const seqs = events.map((e) => e.stream?.seq).sort((a, b) => (a ?? 0) - (b ?? 0));
+    assert.deepEqual(seqs, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("subagent sessions are captured as their own conversation, pointing at the parent", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    const child = sessionExport();
+    const parentId = "ses_parent00000000000000000";
+    child.info!.parentID = parentId;
+    const result = await captureOpencodeExport(child, repo.root);
+    assert.equal(result.appended, 8, "a subagent's own steps are the point of capturing it");
+
+    const events = await readEvents(repo);
+    for (const e of events) {
+      assert.equal(e.stream?.id, `opencode:${SESSION_ID}`);
+      assert.equal(e.stream?.parent, `opencode:${parentId}`);
+    }
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("an errored tool call is captured with is_error", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    const data = sessionExport();
+    const tool = data.messages![1]!.parts![2]!; // seq 3, the completed tool
+    tool.state = { status: "error", input: { filePath: "/nope" }, error: "ENOENT" };
+    await captureOpencodeExport(data, repo.root);
+    const events = await readEvents(repo);
+    const failed = events.find((e) => e.stream?.seq === 3)!;
+    const blocks = (failed.content as { blocks: Record<string, unknown>[] }).blocks;
+    assert.equal(blocks[1]!["is_error"], true);
+    assert.equal(blocks[1]!["content"], "ENOENT");
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+/**
+ * Real opencode part ids, and what makes them useful here.
+ *
+ * opencode mints `prt_` + 12 hex + 14 random base62, where the hex is a 48-bit
+ * `Date.now() * 4096 + counter`. The ids below are the genuine shape (checked
+ * against a live opencode 1.18.10 store, 859 parts, zero ordering violations
+ * within a session); only the random tails are invented.
+ */
+const P = [
+  "prt_fbc184c1b000aaaaaaaaaaaaaa",
+  "prt_fbc184c1b001bbbbbbbbbbbbbb",
+  "prt_fbc184c1b002cccccccccccccc",
+  "prt_fbc184c1b003dddddddddddddd",
+];
+const SEQ = P.map((id) => parseInt(id.slice(4, 16), 16));
+
+/** A session of plain text parts, from whichever of the ids above are named. */
+function textSession(ids: string[]): OpencodeExport {
+  return {
+    info: {
+      id: SESSION_ID,
+      directory: "/tmp/whatever",
+      version: "1.18.10",
+      time: { created: SESSION_CREATED, updated: SESSION_CREATED + 9000 },
+    },
+    messages: [
+      {
+        info: {
+          id: "msg_asst",
+          sessionID: SESSION_ID,
+          role: "assistant",
+          time: { created: SESSION_CREATED + 1 },
+        },
+        parts: ids.map((id, i) => ({
+          id,
+          type: "text",
+          text: `part ${id.slice(4, 16)}`,
+          time: { start: SESSION_CREATED + 10 + i },
+        })),
+      },
+    ],
+  };
+}
+
+const seqsOf = async (repo: Parameters<typeof readEvents>[0]): Promise<number[]> =>
+  (await readEvents(repo, { reachableFrom: null }))
+    .filter((e) => e.kind === "conversation_turn")
+    .map((e) => e.stream!.seq)
+    .sort((a, b) => a - b);
+
+test("seq comes from the part id, so it is a property of the part and not of its neighbours", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    await captureOpencodeExport(textSession(P), repo.root);
+    assert.deepEqual(await seqsOf(repo), SEQ, "each part is numbered by its own id");
+    assert.ok(SEQ[0]! < SEQ[1]! && SEQ[1]! < SEQ[2]!, "and the ids sort in creation order");
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("deleting a part out of the middle does not renumber the survivors", async () => {
+  // The bug this exists to fix. opencode's store is mutable: `session revert`
+  // and `part.removed` delete parts from the middle, and under a positional
+  // index every part after the hole shifted down — re-capturing them under new
+  // ids, because `seq` is part of event identity. Duplicates in the ledger for
+  // content that never changed.
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    await captureOpencodeExport(textSession(P), repo.root);
+    const before = await readEvents(repo, { reachableFrom: null });
+    const idsBefore = new Set(before.map((e) => e.id));
+
+    // The user reverts: the second part is gone, the rest survive unchanged.
+    const reverted = textSession([P[0]!, P[2]!, P[3]!]);
+    await captureOpencodeExport(reverted, repo.root);
+
+    const after = await readEvents(repo, { reachableFrom: null });
+    assert.deepEqual(
+      await seqsOf(repo),
+      SEQ,
+      "the withdrawn part stays in the ledger; the ledger is append-only",
+    );
+    assert.deepEqual(
+      after.map((e) => e.id).filter((id) => !idsBefore.has(id)),
+      [],
+      "and the survivors re-capture under the ids they already had, rather than duplicating",
+    );
+    assert.equal(after.length, before.length, "so the event count does not grow");
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("the cursor is a high-water mark over ids, not a count that a deletion can offset", async () => {
+  // A count only notices parts going away when the session gets *shorter*, so
+  // a deletion offset by an addition left it looking healthy while pointing at
+  // the wrong place. This is exactly that shape: one part removed, one added.
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    await captureOpencodeExport(textSession([P[0]!, P[1]!, P[2]!]), repo.root);
+
+    const swapped = await captureOpencodeExport(textSession([P[0]!, P[2]!, P[3]!]), repo.root);
+    assert.equal(swapped.appended, 1, "only the genuinely new part is appended");
+    assert.deepEqual(await seqsOf(repo), SEQ, "and nothing already captured was missed");
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("an unsettled tool still holds the cursor back under id-derived seqs", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    const running: OpencodeExport = {
+      info: { id: SESSION_ID, directory: "/tmp/whatever", time: { created: SESSION_CREATED } },
+      messages: [
+        {
+          info: { id: "msg_asst", sessionID: SESSION_ID, role: "assistant", time: { created: SESSION_CREATED } },
+          parts: [
+            { id: P[0]!, type: "text", text: "starting", time: { start: SESSION_CREATED + 1 } },
+            {
+              id: P[1]!,
+              type: "tool",
+              tool: "bash",
+              callID: "call_running",
+              state: { status: "running", input: { command: "sleep 1" } },
+            },
+          ],
+        },
+      ],
+    };
+    const first = await captureOpencodeExport(running, repo.root);
+    assert.equal(first.appended, 1, "the running tool is not captured yet");
+
+    const settled = JSON.parse(JSON.stringify(running)) as OpencodeExport;
+    settled.messages![0]!.parts![1]!.state = {
+      status: "completed",
+      input: { command: "sleep 1" },
+      output: "done",
+      time: { start: SESSION_CREATED + 2 },
+    };
+    const second = await captureOpencodeExport(settled, repo.root);
+    assert.equal(second.appended, 1, "and is picked up once it settles, exactly once");
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("a session whose ids opencode did not mint keeps the positional numbering", async () => {
+  // Ids from other tooling exist in the wild. Mixing a 48-bit timestamp with a
+  // small integer inside one session would sort into nonsense, so the scheme is
+  // chosen per session: unless every part parses, the whole session stays
+  // positional and behaves exactly as it did before ids were used at all.
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "initial");
+    await captureOpencodeExport(textSession([P[0]!, "prt_handwritten", P[2]!]), repo.root);
+    assert.deepEqual(await seqsOf(repo), [0, 1, 2], "one odd id demotes the whole session");
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("the hook warns and captures the most recently updated session when its id is missing", async () => {
+  const repo = await makeTempRepo();
+  const originalPath = process.env.PATH;
+  const originalWrite = process.stderr.write;
+  let stderr = "";
+  try {
+    await makeCommit(repo, "initial");
+
+    const bin = join(repo.root, "fake-bin");
+    await mkdir(bin);
+    const olderId = "ses_older00000000000000000";
+    const sessions = [
+      { id: olderId, updated: SESSION_CREATED + 1 },
+      { id: SESSION_ID, updated: SESSION_CREATED + 2 },
+    ];
+    const script = `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.join(" ") === "session list --pure --format json") {
+  process.stdout.write(${JSON.stringify(JSON.stringify(sessions))});
+} else if (args[0] === "export" && args.at(-1) === ${JSON.stringify(SESSION_ID)}) {
+  process.stdout.write(${JSON.stringify(JSON.stringify(sessionExport()))});
+} else {
+  process.exitCode = 2;
+}
+`;
+    await writeFile(join(bin, "opencode"), script, { mode: 0o755 });
+    process.env.PATH = `${bin}${delimiter}${originalPath ?? ""}`;
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      stderr += chunk.toString();
+      return true;
+    }) as typeof process.stderr.write;
+
+    await runOpencodeHook(
+      JSON.stringify({ cwd: repo.root, hook_event_name: "session.idle", secret_note: "TOP-SECRET" }),
+    );
+
+    assert.match(
+      stderr,
+      /opencode hook warning: session\.idle provided no session id; falling back to the project's most recently updated session/,
+    );
+    assert.doesNotMatch(stderr, /TOP-SECRET/, "the warning must not echo hook payload content");
+    const events = await readEvents(repo);
+    assert.ok(events.length > 0, "the selected session should be captured");
+    assert.ok(
+      events.every((event) => event.stream?.id === `opencode:${SESSION_ID}`),
+      "the fallback should select the newest session, not merely the first one listed",
+    );
+  } finally {
+    process.stderr.write = originalWrite;
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    await cleanupRepo(repo);
+  }
+});

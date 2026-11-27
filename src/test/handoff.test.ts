@@ -5,7 +5,7 @@ import { appendFile, chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { captureClaudeTranscript, captureCodexTranscript, findRepo, type RepoInfo } from "conversation-ledger";
+import { captureClaudeTranscript, captureCodexTranscript, findRepo, type RepoInfo } from "../vendor/conversation-ledger/index.js";
 import { historyFor } from "../copies.js";
 import { listConversations } from "../conversations.js";
 import { readLineage } from "../lineage.js";

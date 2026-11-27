@@ -1,4 +1,4 @@
-import { findRepo, gitUserIdentity, type RepoInfo } from "conversation-ledger";
+import { findRepo, gitUserIdentity, type RepoInfo } from "./vendor/conversation-ledger/index.js";
 import { randomUUID } from "node:crypto";
 import { recordPendingBootstrap, reconcileBootstrapContinuations } from "./bootstrap-lineage.js";
 import { writeBootstrapTranscript } from "./bootstrap.js";

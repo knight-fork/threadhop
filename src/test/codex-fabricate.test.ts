@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendEvents } from "conversation-ledger";
+import { appendEvents } from "../vendor/conversation-ledger/index.js";
 import { buildRolloutLines, modelDropNote } from "../targets/codex.js";
 import { listConversations } from "../conversations.js";
 import { cleanupRepo, makeTempRepo, reasoningEventDraft, seedConversation } from "./helpers.js";

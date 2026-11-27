@@ -1,4 +1,4 @@
-import type { EvidenceEvent } from "conversation-ledger";
+import type { EvidenceEvent } from "./vendor/conversation-ledger/index.js";
 import type { Lineage, ContinuationRecord } from "./lineage.js";
 import { turnContent, type ConversationSummary } from "./types.js";
 

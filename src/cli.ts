@@ -1,16 +1,23 @@
 #!/usr/bin/env node
-import { runRecordsCommand } from "annals";
-import { asLedger, findRepo } from "conversation-ledger";
+import { runRecordsCommand } from "./vendor/annals/index.js";
+import { asLedger, findRepo } from "./vendor/conversation-ledger/index.js";
 import { mirrorCommand, type MirrorFlags } from "./mirror.js";
 import { disableCommand, enableCommand, isTriggerSource, runTriggered, statusCommand, triggerCommand } from "./auto-mirror.js";
 import { resumeCommand, type ResumeFlags } from "./resume.js";
 import { shimInstall, shimStatus, shimUninstall } from "./shim.js";
 import { parseCliName } from "./types.js";
 import { targetCapabilities } from "./capabilities.js";
+import { setupCommand } from "./setup.js";
+import { readFileSync } from "node:fs";
+
+const THREADHOP_VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 const USAGE = `threadhop — continue a coding-agent conversation in another CLI
 
 Usage:
+  threadhop setup [--mirror]                          one-time: record Claude Code and Codex
+                                                       conversations (--mirror: and copy them
+                                                       into each other's resume pickers)
   threadhop resume [target-cli] [options]             pick a conversation and resume it
   threadhop list [options]                            print compatible conversations
   threadhop mirror [target-cli...] [options]          keep copies of your recent conversations
@@ -105,6 +112,15 @@ async function main(argv: string[]): Promise<number> {
     return command ? 0 : 1;
   }
 
+  if (command === "setup") {
+    const unknown = args.find((arg) => arg !== "--mirror");
+    if (unknown) { process.stderr.write(`threadhop setup: unknown option: ${unknown}\n`); return 1; }
+    return setupCommand({ mirror: args.includes("--mirror") });
+  }
+  if (command === "version" || command === "--version" || command === "-v") {
+    process.stdout.write(`${THREADHOP_VERSION}\n`);
+    return 0;
+  }
   if (command === "records") return recordsCommand(args);
   if (command === "targets") {
     if (args.some(arg => arg !== "--json")) { process.stderr.write("threadhop: targets accepts only --json\n"); return 1; }

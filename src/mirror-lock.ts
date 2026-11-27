@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { RepoInfo } from "conversation-ledger";
+import type { RepoInfo } from "./vendor/conversation-ledger/index.js";
 
 /**
  * One threadhop writer per repository at a time. Mirror and resume both bring

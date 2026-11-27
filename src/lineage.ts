@@ -1,4 +1,4 @@
-import { appendEvents, readEvents, type EvidenceEvent, type RepoInfo } from "conversation-ledger";
+import { appendEvents, readEvents, type EvidenceEvent, type RepoInfo } from "./vendor/conversation-ledger/index.js";
 
 const CONTINUATION_KIND = "continuation";
 const CONTINUES_REL = "continues";

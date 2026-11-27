@@ -7,7 +7,7 @@ import {
   git,
   type EventDraft,
   type RepoInfo,
-} from "conversation-ledger";
+} from "../vendor/conversation-ledger/index.js";
 
 export async function makeTempRepo(prefix = "threadhop-test-"): Promise<RepoInfo> {
   const dir = await mkdtemp(join(tmpdir(), prefix));

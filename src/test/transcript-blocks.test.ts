@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { EvidenceEvent } from "conversation-ledger";
+import type { EvidenceEvent } from "../vendor/conversation-ledger/index.js";
 import { formatSize, renderTranscript, transcriptSize } from "../transcript.js";
 import { turnContent, type ConversationSummary } from "../types.js";
 

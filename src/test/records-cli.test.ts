@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { asLedger, git, NOTES_REF, readEvents } from "conversation-ledger";
+import { asLedger, git, NOTES_REF, readEvents } from "../vendor/conversation-ledger/index.js";
 import { recordContinuation } from "../lineage.js";
 import { cleanupRepo, makeTempRepo } from "./helpers.js";
 
@@ -36,7 +36,7 @@ test("records CLI uses cledger's exact namespace and does not add transport wiri
     assert.equal(ledger.ns.configFile, ".cledger.json");
     assert.equal(ledger.ns.userConfigDir, "cledger");
     assert.equal(ledger.ns.cliName, "cledger");
-    assert.match(ledger.ns.hookInvocation?.cli ?? "", /conversation-ledger\/dist\/cli\.js$/);
+    assert.match(ledger.ns.hookInvocation?.cli ?? "", /dist\/vendor\/conversation-ledger\/cli\.js$/);
     assert.equal(NOTES_REF, "refs/notes/conversation-ledger");
 
     await git(["remote", "add", "origin", repo.root], { cwd: repo.root });
@@ -53,7 +53,7 @@ test("records CLI uses cledger's exact namespace and does not add transport wiri
     const hookPath = join(repo.commonDir, "hooks", "pre-push");
     const hookBefore = await readFile(hookPath, "utf8");
     const fetchBefore = await git(["config", "--get-all", "remote.origin.fetch"], { cwd: repo.root });
-    assert.match(hookBefore, /cledger.*transport-push|conversation-ledger\/dist\/cli\.js/);
+    assert.match(hookBefore, /cledger.*transport-push|dist\/vendor\/conversation-ledger\/cli\.js/);
     // Checkout directories may themselves contain "threadhop" (as on GitHub
     // runners). Reject Threadhop transport invocations, not those paths.
     assert.doesNotMatch(hookBefore, /(?:^|[\s"/])(?:threadhop|thop)(?:["\s]+)transport-push|threadhop\/dist\/cli\.js/);

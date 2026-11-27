@@ -5,7 +5,7 @@ import { appendFile, mkdir, readdir, readFile, writeFile } from "node:fs/promise
 import { parse } from "smol-toml";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { EvidenceEvent } from "conversation-ledger";
+import type { EvidenceEvent } from "../vendor/conversation-ledger/index.js";
 import { bootstrapPrompt } from "../bootstrap.js";
 import { normalizeTimestamp } from "../timestamps.js";
 import { formatSize, transcriptSize } from "../transcript.js";

@@ -3,7 +3,7 @@ import test from "node:test";
 import { appendFile, chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RepoInfo } from "conversation-ledger";
+import type { RepoInfo } from "../vendor/conversation-ledger/index.js";
 import { listConversations } from "../conversations.js";
 import { readLineage, recordContinuation } from "../lineage.js";
 import { buildPlan, type PlanOptions } from "../resume.js";

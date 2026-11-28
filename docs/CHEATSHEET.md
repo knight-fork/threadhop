@@ -6,41 +6,24 @@ commands you'll use day to day. Tested on macOS; Linux should work the same.
 - **threadhop** continues a conversation from one CLI in another (or from a
   teammate's point), and can keep copies in each CLI's own resume list.
 - **cledger** ([conversation-ledger](https://github.com/evintunador/conversation-ledger))
-  records your conversations, which threadhop reads. It is installed alongside.
+  records your conversations, which threadhop reads. It is bundled with threadhop.
 
 ## 1. Install (once per machine)
 
-Needs Node.js 20+ and git. Copy-paste:
+Needs Node.js 20+ and git.
 
 ```sh
 # who you are: conversations are attributed to this email
 git config --global user.email "you@company.com"
 git config --global user.name  "Your Name"
 
-# threadhop and its two libraries, side by side, at the tested versions
-mkdir -p ~/tools && cd ~/tools
-git clone https://github.com/evintunador/annals.git
-git clone https://github.com/evintunador/conversation-ledger.git
-git clone https://github.com/knight-fork/threadhop.git
-git -C annals checkout -q dcd06c0f724cf3509b2d61dce7d0b537d4d86340
-git -C conversation-ledger checkout -q f9853f7b38ee1fefdb587748055a18e240efb48c
-
-# build, and put `cledger` and `threadhop` (alias `thop`) on your PATH
-(cd annals && npm install)
-(cd conversation-ledger && npm install && npm link)
-(cd threadhop && npm install && npm link)
-
-# keep conversations on this machine: `git push` never uploads them
-mkdir -p ~/.config/cledger
-echo '{"transport": {"hook": false, "fetchRefspec": false}}' > ~/.config/cledger/config.json
-
-# record conversations from both CLIs
-cledger install claude-code
-cledger install codex
-
-# optional: after every turn, keep a copy in the other CLI's resume list
-threadhop mirror enable codex claude
+npm install -g threadhop       # includes cledger; nothing else to clone
+threadhop setup --mirror       # record Claude Code + Codex, keep copies in each other's resume list
 ```
+
+`setup` keeps conversations on this machine (`git push` never uploads them unless
+a repo opts in, see section 3), and installs capture for whichever of Claude Code
+and Codex is on your PATH. Leave out `--mirror` if you don't want copies.
 
 Then, once: open `codex`, type `/hooks`, and approve the new hooks
 (`cledger hook codex`, and `threadhop mirror-trigger codex` if you enabled
@@ -128,7 +111,7 @@ conversations into `main`'s history; declined ones leave them on their branch.
 
 ```sh
 threadhop mirror disable                      # removes threadhop's hooks
-npm rm -g threadhop conversation-ledger       # removes the commands
+npm rm -g threadhop                           # removes the commands (threadhop, thop, cledger)
 ```
 
 cledger has no uninstall command: delete the `cledger hook claude-code` entries

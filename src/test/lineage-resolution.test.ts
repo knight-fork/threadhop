@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { EvidenceEvent } from "conversation-ledger";
+import type { EvidenceEvent } from "../vendor/conversation-ledger/index.js";
 import { resolveLineageHistory } from "../lineage-resolution.js";
 import type { ContinuationRecord, Lineage } from "../lineage.js";
 import { importSourceLabel, type ConversationSummary } from "../types.js";

@@ -1,4 +1,4 @@
-import { readEvents, sortEvents, type EvidenceEvent, type RepoInfo } from "conversation-ledger";
+import { readEvents, sortEvents, type EvidenceEvent, type RepoInfo } from "./vendor/conversation-ledger/index.js";
 import { turnContent, type ConversationSummary } from "./types.js";
 
 export interface ListOptions {

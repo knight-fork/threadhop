@@ -1,4 +1,4 @@
-import type { RepoInfo } from "conversation-ledger";
+import type { RepoInfo } from "./vendor/conversation-ledger/index.js";
 import { recordContinuation, type Lineage } from "./lineage.js";
 import { resolveLineageHistory, type ResolvedHistory } from "./lineage-resolution.js";
 import { MirrorDivergedError, type LaunchPlan, type TargetAdapter } from "./targets/types.js";

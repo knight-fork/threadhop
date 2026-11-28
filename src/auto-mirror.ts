@@ -9,7 +9,7 @@ import {
   captureCodexTranscript,
   findRepo,
   gitUserIdentity,
-} from "conversation-ledger";
+} from "./vendor/conversation-ledger/index.js";
 import { configDir, loadConfig, saveConfig } from "./config.js";
 import { processQueued, type MirrorRequest } from "./mirror-lock.js";
 import { resolveMirrorTargets, runMirror, type MirrorResult } from "./mirror.js";

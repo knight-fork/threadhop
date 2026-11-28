@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendEvents, git, reAnchorDraft } from "conversation-ledger";
+import { appendEvents, git, reAnchorDraft } from "../vendor/conversation-ledger/index.js";
 import { listConversations } from "../conversations.js";
 import { withLedgerNotices } from "../ledger-io.js";
 import { readLineage, recordContinuation } from "../lineage.js";

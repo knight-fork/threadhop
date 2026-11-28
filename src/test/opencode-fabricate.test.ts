@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendEvents } from "conversation-ledger";
+import { appendEvents } from "../vendor/conversation-ledger/index.js";
 import {
   buildImportPayload,
   modelSubstitutionNote,

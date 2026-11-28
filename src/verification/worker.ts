@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { appendEvents, findRepo, type EvidenceEvent } from "conversation-ledger";
+import { appendEvents, findRepo, type EvidenceEvent } from "../vendor/conversation-ledger/index.js";
 import { listConversations } from "../conversations.js";
 import { targets } from "../targets/index.js";
 import { buildPlan } from "../resume.js";

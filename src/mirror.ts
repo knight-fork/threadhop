@@ -1,5 +1,5 @@
-import { loadConfig as loadLedgerConfig } from "annals";
-import { asLedger, findRepo, gitUserIdentity, type RepoInfo } from "conversation-ledger";
+import { loadConfig as loadLedgerConfig } from "./vendor/annals/index.js";
+import { asLedger, findRepo, gitUserIdentity, type RepoInfo } from "./vendor/conversation-ledger/index.js";
 import { reconcileBootstrapContinuations } from "./bootstrap-lineage.js";
 import { loadConfig } from "./config.js";
 import { listConversations } from "./conversations.js";

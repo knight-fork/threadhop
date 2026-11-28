@@ -1,4 +1,4 @@
-import type { EvidenceEvent } from "conversation-ledger";
+import type { EvidenceEvent } from "./vendor/conversation-ledger/index.js";
 import { cliLabel, turnContent, type ConversationSummary, type TurnBlock } from "./types.js";
 
 export function blockToMarkdown(block: TurnBlock): string {

@@ -1,4 +1,4 @@
-import type { EvidenceEvent } from "conversation-ledger";
+import type { EvidenceEvent } from "./vendor/conversation-ledger/index.js";
 import { CLI_CATALOG } from "./cli-catalog.js";
 
 /** Canonical names for supported CLIs, matching cledger's `producer.source`. */

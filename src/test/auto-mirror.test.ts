@@ -5,7 +5,7 @@ import { appendFile, chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RepoInfo } from "conversation-ledger";
+import type { RepoInfo } from "../vendor/conversation-ledger/index.js";
 import {
   disableCommand,
   enableCommand,

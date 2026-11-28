@@ -1,0 +1,920 @@
+import { test } from "node:test";
+import assert from "node:assert";
+import { appendFile, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { captureCodexTranscript, renormalizeUnrecognizedMany, normalizeCodexRolloutRecord } from "../adapters/codex.js";
+import { eventId } from "../schema.js";
+import { readEvents } from "../store.js";
+import { writeCursor } from "../adapters/common.js";
+import { cleanupDir, cleanupRepo, makeCommit, makeTempRepo } from "./helpers.js";
+
+const SESSION_ID = "codex-sess-1";
+// Filename carries a base timestamp + a uuid the sessionIdFromFilename regex
+// can extract; the session_meta line (index 0) then overrides the id, which
+// is the more common real-world case and worth exercising too.
+const FILENAME = "rollout-2026-01-01T00-00-00-123e4567-e89b-12d3-a456-426614174000.jsonl";
+
+test("captureCodexTranscript: only explicit user messages have human attribution", async () => {
+  const repo = await makeTempRepo("cledger-codex-actors-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-actors-"));
+  try {
+    await makeCommit(repo, "init");
+    const roles = ["user", "assistant", "system", "developer", "tool", "future-role"];
+    const lines = [
+      { type: "session_meta", payload: { id: SESSION_ID } },
+      ...roles.map((role, i) => ({
+        type: "response_item", timestamp: `2026-01-01T00:00:0${i}.000Z`,
+        payload: { type: "message", role, content: [{ type: "input_text", text: `${role} content` }] },
+      })),
+    ];
+    const path = join(dir, FILENAME);
+    await writeFile(path, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+    await captureCodexTranscript(path, repo.root);
+    const events = (await readEvents(repo)).filter((e) => e.kind === "conversation_turn").sort((a, b) => a.stream!.seq - b.stream!.seq);
+    assert.strictEqual(events.length, roles.length);
+    assert.deepStrictEqual(events[0]!.actor, { type: "human", id: "test@example.com", display: "Test User" });
+    assert.deepStrictEqual(events[1]!.actor, { type: "agent" });
+    for (let i = 2; i < roles.length; i++) {
+      assert.deepStrictEqual(events[i]!.actor, { type: "system" });
+      assert.deepStrictEqual(events[i]!.raw!.data, lines[i + 1]);
+      assert.strictEqual((events[i]!.content as { role: string }).role, roles[i]);
+    }
+    await writeCursor(repo, SESSION_ID, "lines", 0);
+    const replay = await captureCodexTranscript(path, repo.root);
+    assert.strictEqual(replay.appended, 0);
+    assert.strictEqual(replay.deduped, lines.length);
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("captureCodexTranscript: malformed message bodies remain available as shape drift", async () => {
+  const repo = await makeTempRepo("cledger-codex-shape-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-shape-"));
+  try {
+    await makeCommit(repo, "init");
+    const lines = [
+      { type: "session_meta", payload: { id: SESSION_ID } },
+      { type: "response_item", payload: { type: "message", content: [{ type: "input_text", text: "unknown author" }] } },
+      { type: "response_item", payload: { type: "message", role: "user", content: { future: "shape" } } },
+    ];
+    const path = join(dir, FILENAME);
+    await writeFile(path, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+    const result = await captureCodexTranscript(path, repo.root);
+    assert.deepStrictEqual(result.unrecognized, { "response_item/message/invalid-shape": 2 });
+    const preserved = (await readEvents(repo)).filter((e) => e.kind === "unrecognized").sort((a, b) => a.stream!.seq - b.stream!.seq);
+    assert.deepStrictEqual(preserved.map((e) => e.raw!.data), lines.slice(1));
+    assert.ok(preserved.every((e) => e.actor.type === "system"));
+    await writeCursor(repo, SESSION_ID, "lines", 0);
+    assert.strictEqual((await captureCodexTranscript(path, repo.root)).deduped, lines.length);
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+/** Index 0 is session_meta (recorded as `session_state`, not a turn); 1-4 are
+ * real content; 5 is a reasoning item (preserved opaquely as a `reasoning`
+ * event, never as a conversation_turn); 6 is a truncated trailing line that
+ * must be tolerated. */
+function rolloutLines(): unknown[] {
+  return [
+    { type: "session_meta", payload: { session_id: SESSION_ID } },
+    {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Please run tests" }] },
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:02.000Z",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Sure, running now." }],
+      },
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:03.000Z",
+      payload: { type: "function_call", name: "shell", arguments: { command: "pytest" }, call_id: "call_9" },
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:04.000Z",
+      payload: { type: "function_call_output", call_id: "call_9", output: "5 passed" },
+    },
+    {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:05.000Z",
+      payload: { type: "reasoning", encrypted_content: "opaque-blob-must-never-be-stored" },
+    },
+  ];
+}
+
+async function writeRollout(dir: string): Promise<string> {
+  const path = join(dir, FILENAME);
+  const lines = rolloutLines().map((l) => JSON.stringify(l));
+  lines.push('{"type":"response_item","payload":{"type":"message"');
+  await writeFile(path, lines.join("\n") + "\n");
+  return path;
+}
+
+test("captureCodexTranscript: converts a synthetic rollout end to end", async () => {
+  const repo = await makeTempRepo("cledger-codex-");
+  const rolloutDir = await mkdtemp(join(tmpdir(), "cledger-codex-transcript-"));
+  try {
+    await makeCommit(repo, "init");
+    const rolloutPath = await writeRollout(rolloutDir);
+
+    await captureCodexTranscript(rolloutPath, repo.root);
+
+    const events = await readEvents(repo);
+    assert.strictEqual(
+      events.length,
+      6,
+      "only the malformed trailing line is dropped; session_meta is state, reasoning is opaque",
+    );
+
+    for (const e of events) {
+      assert.strictEqual(e.raw?.format, "codex-rollout-jsonl/2");
+      assert.strictEqual(e.stream?.id, `codex:${SESSION_ID}`);
+      assert.strictEqual(e.producer.source, "codex");
+      assert.strictEqual(
+        e.producer.session_id,
+        SESSION_ID,
+        "session_meta's session_id must override the filename-derived id",
+      );
+    }
+
+    // seq must equal the original line index (session_meta occupies index 0).
+    const bySeq = new Map(events.map((e) => [e.stream!.seq, e]));
+    assert.deepStrictEqual([...bySeq.keys()].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5]);
+
+    // session_meta is what states the CLI version and provider for the whole
+    // rollout; it is recorded rather than merely read for `producer`.
+    const meta = bySeq.get(0)!;
+    assert.strictEqual(meta.kind, "session_state");
+    assert.deepStrictEqual(meta.content, { state_type: "session_meta", session_id: SESSION_ID });
+
+    const userMsg = bySeq.get(1)!;
+    assert.strictEqual(userMsg.actor.type, "human");
+    assert.strictEqual(userMsg.actor.id, "test@example.com");
+    assert.strictEqual(userMsg.actor.display, "Test User");
+    assert.deepStrictEqual(userMsg.content, {
+      role: "user",
+      blocks: [{ type: "text", text: "Please run tests" }],
+    });
+    assert.strictEqual(userMsg.occurred_at, "2026-01-01T00:00:01.000Z");
+
+    const assistantMsg = bySeq.get(2)!;
+    assert.strictEqual(assistantMsg.actor.type, "agent");
+    assert.deepStrictEqual(assistantMsg.content, {
+      role: "assistant",
+      blocks: [{ type: "text", text: "Sure, running now." }],
+    });
+
+    const functionCall = bySeq.get(3)!;
+    assert.strictEqual(functionCall.actor.type, "agent");
+    assert.deepStrictEqual(functionCall.content, {
+      role: "assistant",
+      blocks: [{ type: "tool_use", name: "shell", input: { command: "pytest" }, id: "call_9" }],
+    });
+
+    const functionCallOutput = bySeq.get(4)!;
+    assert.strictEqual(functionCallOutput.actor.type, "system");
+    assert.deepStrictEqual(functionCallOutput.content, {
+      role: "tool_result",
+      blocks: [{ type: "tool_result", tool_use_id: "call_9", content: "5 passed" }],
+    });
+
+    const reasoning = bySeq.get(5)!;
+    assert.strictEqual(reasoning.kind, "reasoning");
+    assert.strictEqual(reasoning.actor.type, "agent");
+    assert.strictEqual((reasoning.content as { opaque?: boolean }).opaque, true);
+    assert.match((reasoning.content as { raw_sha256: string }).raw_sha256, /^[a-f0-9]{64}$/);
+    assert.strictEqual(
+      (reasoning.raw!.data as { payload?: { encrypted_content?: string } }).payload?.encrypted_content,
+      "opaque-blob-must-never-be-stored",
+      "the ciphertext itself lives only in raw.data, never in content",
+    );
+    assert.ok(
+      !JSON.stringify(reasoning.content).includes("opaque-blob"),
+      "the blob must never leak into the visible content field",
+    );
+
+    // --- Rerun on the unchanged rollout: cursor is past EOF, no new events. ---
+    await captureCodexTranscript(rolloutPath, repo.root);
+    const eventsAfterRerun = await readEvents(repo);
+    assert.strictEqual(eventsAfterRerun.length, 6, "rerun on unchanged rollout must not duplicate");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(rolloutDir);
+  }
+});
+
+test("captureCodexTranscript: reasoning items are preserved opaquely, never as a conversation_turn", async () => {
+  const repo = await makeTempRepo("cledger-codex-reasoning-");
+  const rolloutDir = await mkdtemp(join(tmpdir(), "cledger-codex-transcript-reasoning-"));
+  try {
+    await makeCommit(repo, "init");
+    const rolloutPath = await writeRollout(rolloutDir);
+    await captureCodexTranscript(rolloutPath, repo.root);
+    const events = await readEvents(repo);
+    const reasoningEvents = events.filter((e) => e.kind === "reasoning");
+    assert.strictEqual(reasoningEvents.length, 1);
+    for (const e of events) {
+      if (e.kind === "reasoning") continue;
+      assert.notStrictEqual(
+        (e.raw?.data as { payload?: { type?: string } })?.payload?.type,
+        "reasoning",
+        "reasoning payloads must never surface as a conversation_turn or unrecognized event",
+      );
+    }
+
+    // Reprocessing the same rollout must dedup, not duplicate the opaque event.
+    await captureCodexTranscript(rolloutPath, repo.root);
+    const afterRerun = (await readEvents(repo)).filter((e) => e.kind === "reasoning");
+    assert.strictEqual(afterRerun.length, 1);
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(rolloutDir);
+  }
+});
+
+test("captureCodexTranscript: a populated reasoning summary becomes a visible conversation_turn alongside the opaque event", async () => {
+  const repo = await makeTempRepo("cledger-codex-reasoning-summary-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-reasoning-summary-"));
+  try {
+    await makeCommit(repo, "init");
+    const path = join(dir, FILENAME);
+    const lines = [
+      { type: "session_meta", payload: { session_id: SESSION_ID } },
+      {
+        type: "response_item",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        payload: {
+          type: "reasoning",
+          encrypted_content: "opaque-blob-must-never-be-stored",
+          summary: [
+            { type: "summary_text", text: "Considering the test suite." },
+            { type: "summary_text", text: "Deciding to run pytest." },
+          ],
+        },
+      },
+    ];
+    await writeFile(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+    const result = await captureCodexTranscript(path, repo.root);
+    assert.strictEqual(
+      result.appended,
+      3,
+      "the session_meta state record, one visible turn, and one opaque reasoning event",
+    );
+
+    const events = await readEvents(repo);
+    const visible = events.find((e) => e.kind === "conversation_turn")!;
+    const opaque = events.find((e) => e.kind === "reasoning")!;
+    assert.ok(visible, "the summary must surface as an ordinary conversation_turn");
+    assert.ok(opaque);
+    assert.strictEqual(visible.stream?.seq, opaque.stream?.seq, "same source line, same seq");
+    assert.deepStrictEqual(visible.content, {
+      role: "reasoning_summary",
+      blocks: [{ type: "text", text: "Considering the test suite.\n\nDeciding to run pytest." }],
+    });
+    assert.strictEqual((opaque.content as { opaque?: boolean }).opaque, true);
+    assert.match((opaque.content as { raw_sha256: string }).raw_sha256, /^[a-f0-9]{64}$/);
+    const serialized = JSON.stringify(visible);
+    assert.ok(!serialized.includes("opaque-blob"), "the ciphertext must never leak into the visible turn");
+    const upgraded = renormalizeUnrecognizedMany({ ...opaque, kind: "unrecognized", raw: { format: opaque.raw!.format, data: lines[1] } },
+      { name: "Test User", email: "test@example.com" });
+    assert.deepStrictEqual(upgraded?.map(eventId).sort(), [visible.id, opaque.id].sort(), "raw reasoning upgrade recreates both native sibling IDs");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("captureCodexTranscript: a later capture only ingests newly appended lines", async () => {
+  const repo = await makeTempRepo("cledger-codex-growth-");
+  const rolloutDir = await mkdtemp(join(tmpdir(), "cledger-codex-transcript-growth-"));
+  try {
+    await makeCommit(repo, "init");
+    const rolloutPath = await writeRollout(rolloutDir);
+    await captureCodexTranscript(rolloutPath, repo.root);
+    assert.strictEqual((await readEvents(repo)).length, 6);
+
+    await appendFile(
+      rolloutPath,
+      JSON.stringify({
+        type: "response_item",
+        timestamp: "2026-01-01T00:00:10.000Z",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "one more turn" }] },
+      }) + "\n",
+    );
+    await captureCodexTranscript(rolloutPath, repo.root);
+
+    const events = await readEvents(repo);
+    assert.strictEqual(events.length, 7, "only the newly appended line should be added");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(rolloutDir);
+  }
+});
+
+test("captureCodexTranscript: unrecognized line and payload types are counted for drift", async () => {
+  const repo = await makeTempRepo("cledger-codex-drift-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-drift-"));
+  try {
+    await makeCommit(repo, "init");
+    const path = join(dir, FILENAME);
+    const lines = [
+      { type: "session_meta", payload: { session_id: SESSION_ID } },
+      {
+        type: "response_item",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      },
+      // Recognized-but-opaque: reasoning payloads become a reasoning event,
+      // not drift. turn_context is recognized too, as session_state.
+      { type: "response_item", timestamp: "2026-01-01T00:00:02.000Z", payload: { type: "reasoning" } },
+      { type: "turn_context", payload: {} },
+      // Drift: a payload type and a line type this adapter has never seen.
+      {
+        type: "response_item",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        payload: { type: "holo_call", text: "future content kind" },
+      },
+      { type: "brand_new_line_kind", payload: {} },
+    ];
+    await writeFile(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+    const result = await captureCodexTranscript(path, repo.root);
+    // 2 session_state (session_meta, turn_context) + 1 interpreted message
+    // + 1 opaque reasoning event + 2 raw-only preservation events for drift.
+    assert.strictEqual(result.appended, 6);
+    assert.deepStrictEqual(result.unrecognized, {
+      "response_item/holo_call": 1,
+      brand_new_line_kind: 1,
+    });
+
+    // The unrecognized lines are preserved raw-only, not dropped.
+    const events = await readEvents(repo);
+    const preserved = events
+      .filter((e) => e.kind === "unrecognized")
+      .sort((a, b) => (a.stream!.seq - b.stream!.seq));
+    assert.strictEqual(preserved.length, 2);
+
+    const holo = preserved[0]!;
+    assert.strictEqual(holo.actor.type, "system");
+    assert.deepStrictEqual(holo.content, { unrecognized_type: "response_item/holo_call" });
+    assert.strictEqual(holo.raw!.format, "codex-rollout-jsonl/2");
+    // Full source line retained under raw.data for later re-normalization.
+    assert.deepStrictEqual(holo.raw!.data, {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:03.000Z",
+      payload: { type: "holo_call", text: "future content kind" },
+    });
+    assert.strictEqual(holo.occurred_at, "2026-01-01T00:00:03.000Z");
+
+    const brandNew = preserved[1]!;
+    assert.deepStrictEqual(brandNew.content, { unrecognized_type: "brand_new_line_kind" });
+    assert.deepStrictEqual(brandNew.raw!.data, { type: "brand_new_line_kind", payload: {} });
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("captureCodexTranscript: a secret inside an unrecognized line is redacted in raw", async () => {
+  const repo = await makeTempRepo("cledger-codex-drift-secret-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-drift-secret-"));
+  try {
+    await makeCommit(repo, "init");
+    const path = join(dir, FILENAME);
+    const secret = "ghp_" + "a".repeat(36);
+    const lines = [
+      { type: "session_meta", payload: { session_id: SESSION_ID } },
+      {
+        type: "response_item",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        payload: { type: "holo_call", token: secret },
+      },
+    ];
+    await writeFile(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+    await captureCodexTranscript(path, repo.root);
+    const events = await readEvents(repo);
+    const preserved = events.find((e) => e.kind === "unrecognized")!;
+    const serialized = JSON.stringify(preserved);
+    assert.ok(!serialized.includes(secret), "secret must not survive in the preserved event");
+    assert.ok(serialized.includes("[REDACTED:"), "secret must be replaced with a redaction placeholder");
+    assert.ok((preserved.redactions ?? []).length > 0, "a redaction record must be attached");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("captureCodexTranscript: agent_message keeps visible text and seals encrypted blocks in a sibling", async () => {
+  const repo = await makeTempRepo("cledger-codex-agentmsg-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-agentmsg-"));
+  try {
+    await makeCommit(repo, "init");
+    const path = join(dir, FILENAME);
+    const lines = [
+      { type: "session_meta", payload: { session_id: SESSION_ID } },
+      {
+        type: "response_item",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        payload: {
+          type: "agent_message",
+          author: "/root",
+          recipient: "/root/subagent",
+          content: [
+            { type: "input_text", text: "Message Type: NEW_TASK\nTask name: /root/subagent" },
+            { type: "encrypted_content", encrypted_content: "gAAAAAB-opaque-blob-must-never-be-stored" },
+          ],
+        },
+      },
+    ];
+    await writeFile(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+    const result = await captureCodexTranscript(path, repo.root);
+    assert.strictEqual(
+      result.appended,
+      3,
+      "the session_meta state record, the visible turn, and the sealed sibling",
+    );
+    assert.deepStrictEqual(result.unrecognized, {}, "agent_message is a recognized type now");
+
+    const events = await readEvents(repo);
+    const e = events.find((ev) => ev.kind === "conversation_turn")!;
+    assert.strictEqual(e.actor.type, "agent");
+    assert.strictEqual(e.actor.id, "/root");
+    assert.deepStrictEqual(e.content, {
+      role: "agent_message",
+      author: "/root",
+      recipient: "/root/subagent",
+      blocks: [{ type: "text", text: "Message Type: NEW_TASK\nTask name: /root/subagent" }],
+    });
+
+    // The ciphertext must be gone from the *visible turn* — content and raw
+    // alike — leaving only the bare type marker so the split is visible.
+    const serialized = JSON.stringify(e);
+    assert.ok(!serialized.includes("opaque-blob"), "the visible turn must not carry ciphertext");
+    const rawContent = ((e.raw?.data as { payload?: { content?: unknown[] } }).payload?.content) ?? [];
+    assert.deepStrictEqual(rawContent[1], { type: "encrypted_content" });
+    assert.strictEqual(e.raw?.format, "codex-rollout-jsonl/2");
+
+    // ...but preserved on a sealed sibling at the same seq, so an inter-agent
+    // conversation can still be replayed back through the provider that
+    // encrypted it. This is the half that used to be discarded outright.
+    const sealed = events.find((ev) => ev.kind === "reasoning")!;
+    assert.ok(sealed, "the encrypted blocks are preserved as a reasoning event");
+    assert.strictEqual(sealed.stream?.seq, e.stream?.seq, "same source line, same seq");
+    assert.strictEqual((sealed.content as { opaque?: boolean }).opaque, true);
+    assert.match((sealed.content as { raw_sha256: string }).raw_sha256, /^[a-f0-9]{64}$/);
+    const sealedBlocks = (sealed.raw?.data as { payload?: { content?: unknown[] } }).payload?.content ?? [];
+    assert.strictEqual(sealedBlocks.length, 1, "only the encrypted blocks, not the visible text");
+    assert.deepStrictEqual(sealedBlocks[0], {
+      type: "encrypted_content",
+      encrypted_content: "gAAAAAB-opaque-blob-must-never-be-stored",
+    });
+    const preserved = { ...e, kind: "unrecognized" as const, raw: { format: e.raw!.format, data: lines[1] } };
+    const upgraded = renormalizeUnrecognizedMany(preserved, { name: "Test User", email: "test@example.com" });
+    assert.deepStrictEqual(upgraded?.map(eventId).sort(), [e.id, sealed.id].sort(), "raw inter-agent upgrade retains ciphertext sibling");
+    const child = renormalizeUnrecognizedMany({ ...preserved, stream: { ...preserved.stream!, parent: "codex:parent" } },
+      { name: "Test User", email: "test@example.com" });
+    assert.ok(child?.every((draft) => draft.stream?.parent === "codex:parent"), "all upgraded siblings retain native parentage");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+/**
+ * `event_msg` was skipped wholesale as "duplicates the response_item stream".
+ * Only two of its payload types actually do. The rest — token accounting, task
+ * lifecycle, sub-agent activity, aborts — have no twin anywhere in the rollout,
+ * and skipping them threw away the only record of them.
+ */
+test("captureCodexTranscript: event_msg splits into duplicates (dropped) and everything else (recorded)", async () => {
+  const repo = await makeTempRepo("cledger-codex-eventmsg-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-eventmsg-"));
+  try {
+    await makeCommit(repo, "init");
+    const path = join(dir, FILENAME);
+    const lines = [
+      { type: "session_meta", payload: { session_id: SESSION_ID } },
+      // Duplicates of response_item content: dropped, and silently — the
+      // content is captured from the response_item that carries it.
+      {
+        type: "event_msg",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        payload: { type: "agent_message", message: "same text as the response_item" },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        payload: { type: "user_message", message: "same prompt as the response_item" },
+      },
+      // No response_item twin: recorded.
+      {
+        type: "event_msg",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        payload: { type: "token_count", info: { total_tokens: 812 } },
+      },
+      {
+        type: "event_msg",
+        timestamp: "2026-01-01T00:00:04.000Z",
+        payload: { type: "task_started", task_id: "t-1" },
+      },
+      // Settings, not an occurrence.
+      {
+        type: "event_msg",
+        timestamp: "2026-01-01T00:00:05.000Z",
+        payload: { type: "thread_settings_applied", reasoning_effort: "high" },
+      },
+    ];
+    await writeFile(path, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+    const result = await captureCodexTranscript(path, repo.root);
+    assert.deepStrictEqual(result.unrecognized, {}, "event_msg is a known line type, never drift");
+
+    const events = await readEvents(repo);
+    const bySeq = new Map(events.map((e) => [e.stream!.seq, e]));
+    assert.deepStrictEqual(
+      [...bySeq.keys()].sort((a, b) => a - b),
+      [0, 3, 4, 5],
+      "only the two duplicate payload types are dropped",
+    );
+
+    assert.strictEqual(bySeq.get(3)!.kind, "activity");
+    assert.deepStrictEqual(bySeq.get(3)!.content, {
+      activity_type: "event_msg/token_count",
+      info: { total_tokens: 812 },
+    });
+    // The model drove the task; the harness drove the token accounting.
+    assert.strictEqual(bySeq.get(3)!.actor.type, "system");
+    assert.strictEqual(bySeq.get(4)!.actor.type, "agent");
+    assert.strictEqual(bySeq.get(5)!.kind, "session_state");
+    assert.deepStrictEqual(bySeq.get(5)!.content, {
+      state_type: "event_msg/thread_settings_applied",
+      reasoning_effort: "high",
+    });
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+/**
+ * Codex writes one rollout per thread, sub-agents included, in the same flat
+ * date tree with no distinguishing filename. A child is told apart only by
+ * `session_meta.payload.source` being an object with a `subagent` key — and
+ * its `payload.session_id` holds the *parent's* id, not its own.
+ *
+ * Shapes here follow 40 real rollouts on a live Codex 0.146.0: `payload.id`
+ * matched the filename uuid for all 40, `session_id` for only the 29
+ * top-level ones, and the 11 that disagreed were exactly the 11 with an
+ * object `source`, every one carrying `parent_thread_id`.
+ */
+const CHILD_UUID = "222e4567-e89b-12d3-a456-426614174999";
+const PARENT_UUID = "111e4567-e89b-12d3-a456-426614174111";
+const GRANDCHILD_UUID = "333e4567-e89b-12d3-a456-426614174333";
+
+async function writeSubagentRollout(dir: string, meta: Record<string, unknown>): Promise<string> {
+  const path = join(dir, `rollout-2026-01-01T00-00-00-${CHILD_UUID}.jsonl`);
+  const lines = [
+    { type: "session_meta", payload: meta },
+    {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "child turn" }],
+      },
+    },
+  ].map((l) => JSON.stringify(l));
+  await writeFile(path, lines.join("\n") + "\n");
+  return path;
+}
+
+async function writeThreadRollout(
+  dir: string,
+  id: string,
+  meta: Record<string, unknown>,
+  childIds: string[] = [],
+  childShape: "legacy" | "current" = "legacy",
+): Promise<string> {
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, `rollout-2026-01-01T00-00-00-${id}.jsonl`);
+  const lines = [
+    { type: "session_meta", payload: meta },
+    ...childIds.map((agent_thread_id) => ({
+      type: "event_msg",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      payload:
+        childShape === "current"
+          ? {
+              type: "item_completed",
+              item: { type: "SubAgentActivity", agent_thread_id, status: "completed" },
+            }
+          : { type: "sub_agent_activity", agent_thread_id, status: "spawned" },
+    })),
+    {
+      type: "response_item",
+      timestamp: "2026-01-01T00:00:02.000Z",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: `turn from ${id}` }],
+      },
+    },
+  ];
+  await writeFile(path, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+  return path;
+}
+
+test("captureCodexTranscript: discovers current item_completed/SubAgentActivity across the date tree", async () => {
+  const repo = await makeTempRepo("cledger-codex-discovery-");
+  const root = await mkdtemp(join(tmpdir(), "cledger-codex-sessions-"));
+  try {
+    await makeCommit(repo);
+    const parentPath = await writeThreadRollout(
+      join(root, "sessions", "2026", "01", "01"),
+      PARENT_UUID,
+      { id: PARENT_UUID, session_id: PARENT_UUID, source: "cli" },
+      [CHILD_UUID],
+      "current",
+    );
+    await writeThreadRollout(join(root, "sessions", "2026", "01", "02"), CHILD_UUID, {
+      id: CHILD_UUID,
+      session_id: PARENT_UUID,
+      parent_thread_id: PARENT_UUID,
+      source: { subagent: { thread_spawn: { agent_role: "explorer", depth: 1 } } },
+    });
+
+    const result = await captureCodexTranscript(parentPath, repo.root);
+    const events = await readEvents(repo);
+    assert.strictEqual(result.appended, 5);
+    assert.ok(events.some((event) => event.stream?.id === `codex:${PARENT_UUID}`));
+    assert.ok(
+      events
+        .filter((event) => event.stream?.id === `codex:${CHILD_UUID}`)
+        .every((event) => event.stream?.parent === `codex:${PARENT_UUID}`),
+    );
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(root);
+  }
+});
+
+test("captureCodexTranscript: legacy sub_agent_activity is retried when its child appears later", async () => {
+  const repo = await makeTempRepo("cledger-codex-missing-child-");
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-missing-child-"));
+  try {
+    await makeCommit(repo);
+    const parentPath = await writeThreadRollout(
+      dir,
+      PARENT_UUID,
+      { id: PARENT_UUID, session_id: PARENT_UUID, source: "cli" },
+      [CHILD_UUID],
+    );
+
+    const result = await captureCodexTranscript(parentPath, repo.root);
+    const events = await readEvents(repo);
+    assert.strictEqual(result.appended, 3);
+    assert.ok(events.every((event) => event.stream?.id === `codex:${PARENT_UUID}`));
+    assert.ok(
+      events.some(
+        (event) =>
+          event.kind === "activity" &&
+          (event.content as { activity_type?: string }).activity_type ===
+            "event_msg/sub_agent_activity",
+      ),
+      "the spawn activity remains evidence even when the child file is gone",
+    );
+
+    await writeThreadRollout(dir, CHILD_UUID, {
+      id: CHILD_UUID,
+      session_id: PARENT_UUID,
+      parent_thread_id: PARENT_UUID,
+      source: { subagent: { thread_spawn: { depth: 1 } } },
+    });
+    const retry = await captureCodexTranscript(parentPath, repo.root);
+    assert.strictEqual(retry.appended, 2, "discovery re-reads the trail behind the parent's cursor");
+    assert.ok(
+      (await readEvents(repo)).some((event) => event.stream?.id === `codex:${CHILD_UUID}`),
+    );
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("captureCodexTranscript: recursively follows descendants and cycle-guards the trail", async () => {
+  const repo = await makeTempRepo("cledger-codex-recursive-");
+  const root = await mkdtemp(join(tmpdir(), "cledger-codex-recursive-sessions-"));
+  try {
+    await makeCommit(repo);
+    const sessions = join(root, "sessions", "2026", "01");
+    const parentPath = await writeThreadRollout(
+      join(sessions, "01"),
+      PARENT_UUID,
+      { id: PARENT_UUID, session_id: PARENT_UUID, source: "cli" },
+      [CHILD_UUID],
+    );
+    await writeThreadRollout(
+      join(sessions, "02"),
+      CHILD_UUID,
+      {
+        id: CHILD_UUID,
+        session_id: PARENT_UUID,
+        parent_thread_id: PARENT_UUID,
+        source: { subagent: { thread_spawn: { depth: 1 } } },
+      },
+      [GRANDCHILD_UUID],
+    );
+    await writeThreadRollout(
+      join(sessions, "03"),
+      GRANDCHILD_UUID,
+      {
+        id: GRANDCHILD_UUID,
+        session_id: CHILD_UUID,
+        parent_thread_id: CHILD_UUID,
+        source: { subagent: { thread_spawn: { depth: 2 } } },
+      },
+      [PARENT_UUID], // malformed ancestor link: must not recurse forever
+    );
+
+    const first = await captureCodexTranscript(parentPath, repo.root);
+    assert.strictEqual(first.appended, 9);
+    const events = await readEvents(repo);
+    assert.deepStrictEqual(
+      new Set(events.map((event) => event.stream?.id)),
+      new Set([`codex:${PARENT_UUID}`, `codex:${CHILD_UUID}`, `codex:${GRANDCHILD_UUID}`]),
+    );
+    assert.ok(
+      events
+        .filter((event) => event.stream?.id === `codex:${GRANDCHILD_UUID}`)
+        .every((event) => event.stream?.parent === `codex:${CHILD_UUID}`),
+    );
+
+    const second = await captureCodexTranscript(parentPath, repo.root);
+    assert.strictEqual(second.appended, 0, "the recursive walk remains incremental");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(root);
+  }
+});
+
+test("captureCodexTranscript: a sub-agent rollout is its own conversation, under its parent", async () => {
+  const repo = await makeTempRepo();
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-sub-"));
+  try {
+    await makeCommit(repo);
+    const path = await writeSubagentRollout(dir, {
+      id: CHILD_UUID,
+      // The trap: on a child rollout this names the PARENT thread.
+      session_id: PARENT_UUID,
+      parent_thread_id: PARENT_UUID,
+      source: { subagent: { thread_spawn: { agent_role: "reviewer", depth: 1 } } },
+    });
+    await captureCodexTranscript(path, repo.root);
+
+    const events = await readEvents(repo);
+    const turn = events.find((e) => e.kind === "conversation_turn")!;
+    assert.strictEqual(
+      turn.stream!.id,
+      `codex:${CHILD_UUID}`,
+      "the child's turns belong to the child, not to whatever session_id claimed",
+    );
+    assert.strictEqual(
+      turn.stream!.parent,
+      `codex:${PARENT_UUID}`,
+      "and the trail back to the parent is recorded",
+    );
+    assert.strictEqual(turn.producer.session_id, CHILD_UUID);
+    // Every event in the file gets the link, not just the turns — the parent
+    // is a property of the rollout.
+    assert.ok(
+      events.every((e) => e.stream?.parent === `codex:${PARENT_UUID}`),
+      "session_meta and turns alike carry the parent",
+    );
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("captureCodexTranscript: a top-level rollout keeps its id and gains no parent", async () => {
+  // The no-churn guarantee: for a top-level session `id`, `session_id` and the
+  // filename uuid all agree, so preferring `id` changes no event's identity.
+  const repo = await makeTempRepo();
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-top-"));
+  try {
+    await makeCommit(repo);
+    const path = await writeSubagentRollout(dir, {
+      id: CHILD_UUID,
+      session_id: CHILD_UUID,
+      source: "cli",
+    });
+    await captureCodexTranscript(path, repo.root);
+
+    const events = await readEvents(repo);
+    assert.ok(events.length > 0);
+    assert.ok(
+      events.every((e) => e.stream?.id === `codex:${CHILD_UUID}`),
+      "a string `source` is a top-level session",
+    );
+    assert.ok(
+      events.every((e) => e.stream?.parent === undefined),
+      "and it is nobody's child",
+    );
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("captureCodexTranscript: parent and child do not share a capture cursor", async () => {
+  // Keying on the parent's id meant both threads wrote the same cursor file,
+  // each dragging the other into a full rescan. Distinct ids, distinct cursors:
+  // capturing the child must not make the parent re-ingest what it already had.
+  const repo = await makeTempRepo();
+  const dir = await mkdtemp(join(tmpdir(), "cledger-codex-cursor-"));
+  try {
+    await makeCommit(repo);
+    const parentPath = join(dir, `rollout-2026-01-01T00-00-00-${PARENT_UUID}.jsonl`);
+    await writeFile(
+      parentPath,
+      [
+        JSON.stringify({ type: "session_meta", payload: { id: PARENT_UUID, session_id: PARENT_UUID, source: "cli" } }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: "parent turn" }] },
+        }),
+      ].join("\n") + "\n",
+    );
+    const firstPass = await captureCodexTranscript(parentPath, repo.root);
+    assert.ok(firstPass.appended > 0);
+
+    const childPath = await writeSubagentRollout(dir, {
+      id: CHILD_UUID,
+      session_id: PARENT_UUID,
+      parent_thread_id: PARENT_UUID,
+      source: { subagent: { other: {} } },
+    });
+    await captureCodexTranscript(childPath, repo.root);
+
+    // The parent is now at EOF and has nothing new; if the child had clobbered
+    // its cursor this would re-ingest and report appended > 0.
+    const reRun = await captureCodexTranscript(parentPath, repo.root);
+    assert.strictEqual(reRun.appended, 0, "the parent's cursor survived the child's capture");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(dir);
+  }
+});
+
+test("pure Codex-derived normalization preserves native Codex IDs and selects fork namespace before storage", async () => {
+  const repo=await makeTempRepo(), dir=await mkdtemp(join(tmpdir(),"cledger-codex-pure-"));
+  try {
+    await makeCommit(repo,"initial");
+    const lines=[{type:"session_meta",timestamp:"2026-01-01T00:00:00Z",payload:{id:SESSION_ID}},
+      {type:"response_item",timestamp:"2026-01-01T00:00:01Z",payload:{type:"message",role:"user",content:[{type:"input_text",text:"Prompt"}]}},
+      {type:"response_item",timestamp:"2026-01-01T00:00:02Z",payload:{type:"function_call",name:"read",call_id:"call",arguments:'{"path":"file"}'}},
+      {type:"event_msg",timestamp:"2026-01-01T00:00:03Z",payload:{type:"token_count",info:{total_tokens:12}}}];
+    const path=join(dir,FILENAME);await writeFile(path,lines.map(line => JSON.stringify(line)).join("\n")+"\n");await captureCodexTranscript(path,repo.root);
+    const events=await readEvents(repo);
+    for (const original of events) {
+      const ctx={source:"codex",sessionId:SESSION_ID,conversationId:`codex:${SESSION_ID}`,seq:original.stream!.seq,occurredAt:original.occurred_at,
+        version:original.producer.version!,rawFormat:original.raw!.format,identity:{name:original.actor.display??null,email:original.actor.id??null}};
+      assert.equal(eventId(normalizeCodexRolloutRecord(original.raw!.data,ctx)![0]!),original.id);
+      const fork=normalizeCodexRolloutRecord(original.raw!.data,{...ctx,source:"open-interpreter",conversationId:`open-interpreter:${SESSION_ID}`,rawFormat:"open-interpreter-rollout-jsonl/1"})![0]!;
+      assert.equal(fork.producer.source,"open-interpreter");assert.equal(fork.stream!.id,`open-interpreter:${SESSION_ID}`);assert.notEqual(eventId(fork),original.id);
+      assert.deepEqual(fork.content,original.content);
+    }
+  }finally{await cleanupRepo(repo);await cleanupDir(dir);}
+});
+
+test("Codex 0.159 token usage records and revised ciphertext retain distinct identities", () => {
+  const ctx = { source: "codex", sessionId: SESSION_ID, seq: 3, version: "test", rawFormat: "codex-rollout-jsonl/2",
+    conversationId: `codex:${SESSION_ID}`, occurredAt: "2026-01-01T00:00:00.000Z" };
+  const line = { type: "token_usage_record", timestamp: ctx.occurredAt, ordinal: 9,
+    payload: { response_id: "resp_TESTONLY", usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      turn_token_usage: { total_tokens: 2 }, thread_token_usage: { total_tokens: 4 } } };
+  const [draft] = normalizeCodexRolloutRecord(line, ctx)!;
+  assert.equal(draft!.kind, "activity");
+  assert.deepEqual(draft!.raw!.data, line);
+  assert.equal((draft!.content as { activity_type: string }).activity_type, "token_usage_record");
+  const opaque = (encrypted_content: string) => normalizeCodexRolloutRecord({ type: "response_item",
+    payload: { type: "reasoning", encrypted_content, summary: [] } }, ctx)![0]!;
+  assert.notEqual(eventId(opaque("TESTONLY_one")), eventId(opaque("TESTONLY_two")));
+});

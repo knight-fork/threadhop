@@ -5,7 +5,7 @@ import { appendFile, chmod, mkdtemp, readdir, readFile, rm, writeFile } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readEvents, type RepoInfo } from "conversation-ledger";
+import { readEvents, type RepoInfo } from "../vendor/conversation-ledger/index.js";
 import { mirrorCandidates, renderMirrorResults, runMirror, type MirrorOptions, type MirrorResult } from "../mirror.js";
 import type { ConversationSummary } from "../types.js";
 import { claudeCodeTarget, encodeProjectDir } from "../targets/claude-code.js";

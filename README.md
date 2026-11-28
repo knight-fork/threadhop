@@ -17,14 +17,166 @@ Codex replays its provider-encrypted reasoning blobs verbatim by default (see
 "Encrypted reasoning replay" below), and the imported-session notice discloses
 exactly that whenever it happens.
 
-## Usage
+Conversation Ledger and the library under it,
+[annals](https://github.com/evintunador/annals), are bundled inside threadhop
+(MIT, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)), so there is one
+package to install and nothing else to clone.
 
-New machine? [docs/CHEATSHEET.md](docs/CHEATSHEET.md) has the install steps and
-everyday commands on one page.
+## Install
+
+Needs Node.js 20 or newer and git.
 
 ```sh
-# capture (once per machine): conversation-ledger hooks
-cledger install all
+npm install -g threadhop
+threadhop setup --mirror
+```
+
+That's it. `threadhop setup` records conversations from Claude Code and Codex
+(whichever you have), keeps them on this machine unless a repository opts in to
+sharing, and with `--mirror` keeps a copy of each conversation in the other
+CLI's own resume list. If you use Codex, open it once, type `/hooks` and approve
+the new hooks: Codex ignores a hook until you do.
+
+Setup stops, changing nothing, if git doesn't know your email yet. Every
+recorded turn is attributed to it, which is how threadhop tells your
+conversations from a teammate's:
+
+```sh
+git config --global user.email "you@company.com"
+git config --global user.name  "Your Name"
+```
+
+From source instead: `git clone https://github.com/knight-fork/threadhop.git &&
+cd threadhop && npm install && npm link`, then `threadhop setup --mirror`.
+
+The package also provides the `cledger` command, so hooks from an earlier
+standalone conversation-ledger install keep working. If you installed
+conversation-ledger globally before, run `npm rm -g conversation-ledger` first
+so the two `cledger` commands don't collide.
+
+[docs/CHEATSHEET.md](docs/CHEATSHEET.md) has setup and the everyday commands on
+one page.
+
+## Use cases
+
+Each of these assumes `threadhop setup` has run on every machine involved, and
+that Claude Code or Codex was started **inside the project's git repository**:
+a turn is recorded into the repository the CLI is in when the turn ends, and
+nothing is recorded outside one.
+
+### You hit a usage limit mid-task: carry on in the other CLI
+
+You've spent an hour in Claude Code planning a parser and hit your limit.
+
+```sh
+threadhop resume codex
+```
+
+Pick the conversation and Codex opens with the whole visible conversation
+(your messages, the answers, tool calls and their output) as a native Codex
+session, so you keep going where you stopped. It works the other way too
+(`threadhop resume claude`). Hidden reasoning doesn't carry across CLIs, and
+the session opens with a notice saying exactly what was imported.
+
+### Your conversations are already in the other CLI's list
+
+With `threadhop setup --mirror`, a copy of each conversation is kept up to date
+in the other CLI after every turn, so `codex resume` lists your Claude Code
+conversations and `claude --resume` lists your Codex ones. Nothing to run.
+`threadhop mirror status` shows what it has done.
+
+### Hand a conversation to a teammate
+
+Alice explored a bug with Claude Code, has to switch tasks, and wants Bob to
+pick it up with all the context: what was tried, what failed, what the agent
+found.
+
+**Once per repository** (private repositories only, because everything said in
+the conversations travels with the code), someone commits:
+
+```sh
+echo '{"transport": {"hook": true, "fetchRefspec": true}}' > .cledger.json
+git add .cledger.json && git commit -m "Share agent conversations with the team"
+git push
+```
+
+**Alice** keeps working as usual and pushes her branch. `git push` uploads the
+conversations behind the commits she pushes, after scanning them for secrets.
+Work she hasn't pushed stays on her machine.
+
+**Bob**, after `threadhop setup` on his machine:
+
+```sh
+git clone git@github.com:acme/calculator.git && cd calculator
+threadhop records sync --fetch-only   # once after cloning; later a plain `git pull` brings them
+threadhop list --all
+```
+```
+[1]  Claude Code  2h ago   4 turns  by Alice  · Plan the expression parser for our calculator
+```
+```sh
+threadhop resume --all          # pick [1], then pick Claude Code or Codex
+```
+
+Bob's CLI opens with Alice's conversation, and he continues it in whichever CLI
+he prefers. Plain `threadhop list` (without `--all`) shows only your own
+conversations, plus branches other people made of them.
+
+### See where a teammate took your conversation
+
+When Bob continues Alice's conversation and pushes, the conversation now has a
+branch. Alice runs `git pull` then `threadhop list`, and sees it drawn the way
+`git log --graph` draws commits:
+
+```
+[1]  Claude Code  2h ago   6 turns  · plan the expression parser
+[2]  └─ Codex     1h ago   6 turns  by Bob  ↳ from turn 4, +2 turns  · handle operator precedence
+```
+
+Pick `[1]` to carry on from where she left off, or `[2]` to carry on from where
+Bob did: her first four turns, then his two. Neither copy overwrites the other.
+
+### Review a pull request with the conversation that produced it
+
+Conversations are anchored to the commits they were made on, so they follow
+the branch. To see why an agent-written PR looks the way it does:
+
+```sh
+git fetch && git switch feature/precedence
+threadhop list --all              # conversations behind this branch
+cledger conversations             # every recorded conversation id in this repo
+cledger show <id>                 # read one without resuming it
+```
+
+When the PR merges, its conversations become part of `main`'s history. When it
+is declined they stay on its branch (`threadhop list --any-commit` still finds
+them).
+
+### Move between your own laptop and desktop
+
+Same mechanism as handing off to a teammate, with you on both ends: in a
+repository that shares conversations, push from the laptop, then on the desktop
+run `git pull` and `threadhop resume`. Both machines use the same git email, so
+the conversation is listed as yours without `--all`.
+
+### Keep a repository's conversations out of it entirely
+
+For a repository that must never record conversations (a client repo, or
+anything public), commit this as its `.cledger.json`:
+
+```sh
+echo '{"enabled": false}' > .cledger.json
+```
+
+Sharing is already off everywhere by default. A public repository only carries
+conversations if someone commits the sharing `.cledger.json` above, so never
+commit that one to a public repository.
+
+## Usage
+
+```sh
+# once per machine: capture Claude Code + Codex, optionally auto-mirror
+threadhop setup --mirror
 
 # pick a conversation from this repo's history and resume it anywhere
 threadhop resume            # interactive: choose conversation, then target CLI
@@ -54,7 +206,8 @@ threadhop shim install
 records** at `refs/notes/conversation-ledger`, including threadhop's
 continuation events. It uses cledger's exact Ledger factory; threadhop has no
 separate notes ref, profile, transport hook, or `transport-push` entrypoint.
-`cledger` owns capture, hook installation (`cledger install all`), and notes
+`cledger` (bundled with threadhop) owns capture, hook installation
+(`threadhop setup`, or `cledger install <cli>` for other CLIs), and notes
 transport. For example, `threadhop records sync --fetch-only` fetches the
 shared records. `threadhop records review`, `inspect`, `redact`, `allow`, and
 manual `reanchor` are human-only operations; run them yourself in a plain
@@ -223,8 +376,8 @@ See [product intent](docs/PRODUCT_INTENT.md), the
 ## Development
 
 ```sh
-npm install   # links ../conversation-ledger
-npm test      # build + node --test
+npm install   # no sibling checkouts: conversation-ledger and annals live in src/vendor
+npm test      # build + node --test (threadhop and the vendored libraries)
 npm run verify:plan # planned installed-TUI hub matrix (does not launch CLIs)
 ```
 
@@ -236,8 +389,8 @@ from installed certification: authentication blockers, native runtime failures,
 and untested versions remain visible in the reports.
 
 ```sh
-npm run verify:installed -- --cledger /clean/cledger/dist/cli.js --only codex,opencode --mode native-import --output /tmp/thop-evidence
-npm run verify:program -- --cledger /clean/cledger/dist/cli.js --runtime-dir /tmp/pinned-clis --output /tmp/thop-matrix
+npm run verify:installed -- --cledger dist/vendor/conversation-ledger/cli.js --only codex,opencode --mode native-import --output /tmp/thop-evidence
+npm run verify:program -- --cledger dist/vendor/conversation-ledger/cli.js --runtime-dir /tmp/pinned-clis --output /tmp/thop-matrix
 npm run verify:report -- /tmp/thop-matrix/evidence.json
 ```
 
@@ -263,6 +416,9 @@ it is not a vendor billing guarantee. Paid and local-model evidence remain
 separate from scripted passes. Neither live tier has been certified in this run.
 Full visual layout judging remains separate work.
 
+Updating the vendored libraries: see [src/vendor/README.md](src/vendor/README.md).
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Bundled conversation-ledger and annals: MIT, see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

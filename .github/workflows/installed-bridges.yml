@@ -42,6 +42,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: threadhop
+      # threadhop vendors conversation-ledger and annals under src/vendor and
+      # builds without these checkouts; they are kept only for upstream's
+      # runtime-provisioning harness (verification/ is not vendored).
       - uses: actions/checkout@v4
         with:
           repository: evintunador/conversation-ledger
@@ -95,7 +98,7 @@ jobs:
         env:
           THREADHOP_VERIFY_MISTRAL_VIBE_BINARY: ${{ runner.temp }}/vibe/bin/vibe
         run: |
-          node dist/verification/program.js --cledger "$GITHUB_WORKSPACE/conversation-ledger/dist/cli.js" \
+          node dist/verification/program.js --cledger "$GITHUB_WORKSPACE/threadhop/dist/vendor/conversation-ledger/cli.js" \
             --runtime-dir "$RUNNER_TEMP/runtimes" --hub '${{ matrix.hub }}' --require-core true --output "$RUNNER_TEMP/evidence"
       - name: Retain results including failures and blocked routes
         if: always()

@@ -82,8 +82,10 @@ the session opens with a notice saying exactly what was imported.
 
 With `threadhop setup --mirror`, a copy of each conversation is kept up to date
 in the other CLI after every turn, so `codex resume` lists your Claude Code
-conversations and `claude --resume` lists your Codex ones. Nothing to run.
-`threadhop mirror status` shows what it has done.
+conversations and `claude --resume` lists your Codex ones, when run from the
+same folder. Nothing to run. Only conversations that are entirely yours are
+mirrored (never a teammate's), and `threadhop mirror status` shows what it has
+done.
 
 ### Hand a conversation to a teammate
 
@@ -102,13 +104,13 @@ git push
 
 **Alice** keeps working as usual and pushes her branch. `git push` uploads the
 conversations behind the commits she pushes, after scanning them for secrets.
-Work she hasn't pushed stays on her machine.
+Work she hasn't pushed, and uncommitted changes, stay on her machine.
 
 **Bob**, after `threadhop setup` on his machine:
 
 ```sh
 git clone git@github.com:acme/calculator.git && cd calculator
-threadhop records sync --fetch-only   # once after cloning; later a plain `git pull` brings them
+threadhop records sync --fetch-only   # once after cloning; later a plain `git pull` or `git fetch` brings them
 threadhop list --all
 ```
 ```
@@ -119,8 +121,10 @@ threadhop resume --all          # pick [1], then pick Claude Code or Codex
 ```
 
 Bob's CLI opens with Alice's conversation, and he continues it in whichever CLI
-he prefers. Plain `threadhop list` (without `--all`) shows only your own
-conversations, plus branches other people made of them.
+he prefers. Without `--all`, `list` and `resume` show conversations you took
+part in, branches other people made of them, and older ones with no recorded
+author. Naming a branch (`git pull origin feature`) makes git skip the
+conversations, so use a plain `git pull` to get them.
 
 ### See where a teammate took your conversation
 
@@ -135,6 +139,8 @@ branch. Alice runs `git pull` then `threadhop list`, and sees it drawn the way
 
 Pick `[1]` to carry on from where she left off, or `[2]` to carry on from where
 Bob did: her first four turns, then his two. Neither copy overwrites the other.
+A copy nobody has typed in is the same point as its original, so it isn't
+listed separately.
 
 ### Review a pull request with the conversation that produced it
 
@@ -168,9 +174,10 @@ anything public), commit this as its `.cledger.json`:
 echo '{"enabled": false}' > .cledger.json
 ```
 
-Sharing is already off everywhere by default. A public repository only carries
-conversations if someone commits the sharing `.cledger.json` above, so never
-commit that one to a public repository.
+`threadhop setup` turns sharing off for every repository on your machine
+(`~/.config/cledger/config.json`), so a repository only carries conversations
+if someone commits the sharing `.cledger.json` above. Never commit that one to
+a public repository.
 
 ## Usage
 
@@ -182,14 +189,14 @@ threadhop setup --mirror
 threadhop resume            # interactive: choose conversation, then target CLI
 threadhop resume codex      # resume straight into Codex
 threadhop resume claude     # resume straight into Claude Code
-threadhop resume opencode   # resume straight into opencode
-threadhop resume qwen       # native visible-text import where format supported
-threadhop resume gemini     # transcript bootstrap
-threadhop mirror codex claude   # keep your recent conversations in these CLIs' own pickers
-threadhop mirror enable codex claude   # ...automatically, after every turn
-threadhop targets           # list implemented routes for all twenty targets
+threadhop resume opencode   # any of the twenty targets; `threadhop targets` shows each one's route
 threadhop list              # print compatible conversations
-threadhop records --help    # shared cledger records maintenance commands
+threadhop mirror codex claude          # copy your recent conversations into these CLIs' pickers now
+threadhop mirror enable codex claude   # ...automatically, after every turn
+threadhop mirror status | disable
+threadhop targets           # native import / exact resume / bootstrap, per target
+threadhop records --help    # maintain the shared conversation records
+threadhop --version
 
 # options
 #   --all                   include collaborators' conversations
@@ -202,33 +209,20 @@ threadhop records --help    # shared cledger records maintenance commands
 threadhop shim install
 ```
 
-`threadhop records <command>` operates on the **shared cledger conversation
-records** at `refs/notes/conversation-ledger`, including threadhop's
-continuation events. It uses cledger's exact Ledger factory; threadhop has no
-separate notes ref, profile, transport hook, or `transport-push` entrypoint.
-`cledger` (bundled with threadhop) owns capture, hook installation
-(`threadhop setup`, or `cledger install <cli>` for other CLIs), and notes
-transport. For example, `threadhop records sync --fetch-only` fetches the
-shared records. `threadhop records review`, `inspect`, `redact`, `allow`, and
-manual `reanchor` are human-only operations; run them yourself in a plain
-terminal. `threadhop sync`, `review`, `inspect`, `redact`, `allow`, and
-`reanchor` are shortcuts to the same records dispatcher.
+**Records.** Conversations are stored once, by the bundled `cledger`, as git
+notes at `refs/notes/conversation-ledger`; threadhop's own continuation events
+go into the same notes, with no separate ref. `threadhop records <command>`
+maintains them (for example `threadhop records sync --fetch-only`), and
+`threadhop sync`, `review`, `inspect`, `redact`, `allow` and `reanchor` are
+shortcuts for the same commands. `review`, `inspect`, `redact`, `allow` and a
+manual `reanchor` are for you to run yourself in a plain terminal, not for an
+agent. Capture for CLIs other than Claude Code and Codex is installed with
+`cledger install <cli>` (`cledger --help` lists them).
 
-For standalone annals maintenance, register cledger's existing namespace once:
-
-```sh
-annals profile add conversation-ledger \
-  --namespace conversation-ledger \
-  --incoming cledger-incoming \
-  --internal-env CLEDGER_INTERNAL \
-  --state-dir conversation-ledger \
-  --config-file .cledger.json \
-  --user-config-dir cledger \
-  --cli-name cledger
-```
-
-Same-CLI selections use exact native resume when implemented; Aider and Continue use transcript bootstrap because their current adapters cannot select an exact native session ID. Cross-CLI selections write a
-target-native session file and hand off to the target's own resume; when that
+**Routes.** Resuming in the same CLI uses that CLI's own exact resume, except
+Aider and Continue, which can't open a session by id and get a transcript
+bootstrap instead. Resuming in a different CLI writes a
+target-native session file and hands off to the target's own resume; when that
 is unsupported for the installed CLI version, threadhop falls back to a fresh
 session bootstrapped with the literal transcript.
 
@@ -262,15 +256,11 @@ pickers look. `--dry-run` shows what would be created or updated. Targets and
 limit can be set once in `~/.threadhop/config.json`:
 `{"mirror": {"targets": ["codex", "claude-code"], "limit": 10}}`.
 
-**Automatic mirroring.** `threadhop mirror enable codex claude` does the same
-after every turn, with nothing to run by hand:
-
-```sh
-cledger install claude-code && cledger install codex   # capture comes first
-threadhop mirror enable codex claude
-threadhop mirror status    # hooks installed, and what recent runs did
-threadhop mirror disable   # removes the hooks; copies made so far stay
-```
+**Automatic mirroring.** `threadhop setup --mirror`, or `threadhop mirror
+enable codex claude` on a machine where capture is already set up, does the
+same after every turn. `threadhop mirror status` shows the hooks and what
+recent runs did; `threadhop mirror disable` removes the hooks and keeps the
+copies made so far.
 
 `enable` adds a `threadhop mirror-trigger <cli>` hook next to cledger's in each
 CLI that has somewhere else to send its conversations (`~/.claude/settings.json`,
@@ -298,41 +288,8 @@ still brought up to date on disk when the original changes, but the open
 session doesn't see those turns. Reopen it before typing; if you type first,
 the copy's file holds turns that session never saw.
 
-**Working with collaborators.** In a private repository, conversations can
-travel with the code, so a teammate can pick up where you left off and you can
-pick up where they did. Sharing is per repository: keep it off globally
-(`{"transport": {"hook": false, "fetchRefspec": false}}` in
-`~/.config/cledger/config.json`) and commit a `.cledger.json` with
-`{"transport": {"hook": true, "fetchRefspec": true}}` to the repositories you
-share. A public repository then never carries conversations.
-
-- `git push` uploads the conversations behind the branches you push (after a
-  secret scan); work you haven't pushed, and uncommitted changes, stay with you.
-- A teammate installs cledger and threadhop, runs
-  `threadhop records sync --fetch-only` once after cloning, and from then on a
-  plain `git fetch` or `git pull` brings conversations too. Naming a branch
-  (`git pull origin feature`) makes git skip them.
-- Each turn is recorded into the repository the CLI is running in when the turn
-  ends, so start Claude Code or Codex inside the project.
-
-Continuing someone's conversation starts a branch of it, and `threadhop list`
-and `resume` show branches the way `git log --graph` shows commits:
-
-```
-[1]  Claude Code  2h ago   6 turns  · plan the expression parser
-[2]  └─ Codex     1h ago   6 turns  by Bob  ↳ from turn 4, +2 turns  · handle operator precedence
-```
-
-Pick `[1]` to carry on from where you left off, or `[2]` to carry on from
-where Bob did: your first four turns, then his. Branches anyone made of your
-conversations are listed without `--all`; a copy nobody typed in is the same
-point as its original and isn't listed. Conversations follow the code they
-were anchored to, so a merged pull request brings its conversations into
-`main`'s history, and a declined one leaves them on its branch (`--any-commit`
-still lists them).
-
-opencode works in both directions as of conversation-ledger 0.18.0, which
-captures it via a `session.idle` plugin rather than a shell hook. Two things
+**opencode** works in both directions. Its capture is a `session.idle` plugin
+rather than a shell hook, installed with `cledger install opencode`. Two things
 differ from the other CLIs in practice. Its sessions live in one shared SQLite
 DB rather than per-session files, so fabrication goes through `opencode
 import`, and a bridged session is filed under the current directory's opencode
@@ -354,11 +311,11 @@ native one. See [the opencode spec](docs/specs/opencode-session-format.md),
 ## Encrypted reasoning replay
 
 Codex's `reasoning` response_items carry ciphertext only OpenAI's servers can
-decrypt; conversation-ledger preserves it losslessly and opaquely (0.10.0+).
+decrypt; the recorder keeps it byte for byte without reading it.
 When fabricating a Codex-origin conversation back into Codex, threadhop
 replays those blobs verbatim by default, which can restore hidden reasoning
-provider-side (verified same-account and cross-account: see
-conversation-ledger's roadmap). Replay is gated per-event on the reasoning
+provider-side (verified same-account and cross-account; see
+[conversation-ledger's roadmap](https://github.com/evintunador/conversation-ledger)). Replay is gated per-event on the reasoning
 event's own `producer.source === "codex"`, so it can never apply to a
 Claude Code target — foreign reasoning can't be forged as a native reasoning
 item, so the only real switch is whether provider-matched replay happens.
@@ -413,8 +370,8 @@ Set that dedicated environment variable yourself; ordinary account credentials
 are never inherited. Requests reserve a conservative text/token estimate before
 inference and reject multimodal inputs. Supplied prices determine the estimate;
 it is not a vendor billing guarantee. Paid and local-model evidence remain
-separate from scripted passes. Neither live tier has been certified in this run.
-Full visual layout judging remains separate work.
+separate from scripted passes. Neither live tier is certified yet, and judging
+full visual layout is separate work.
 
 Updating the vendored libraries: see [src/vendor/README.md](src/vendor/README.md).
 

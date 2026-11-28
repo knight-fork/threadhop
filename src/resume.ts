@@ -196,7 +196,7 @@ export async function resumeCommand(flags: ResumeFlags): Promise<number> {
   if (conversations.length === 0) {
     process.stderr.write(
       "threadhop: no captured conversations for this repo state.\n" +
-        "  - capture runs via conversation-ledger hooks: `cledger install all`\n" +
+        "  - nothing recorded yet? run `threadhop setup` once, then start Claude Code or Codex inside this repo\n" +
         "  - `--any-commit` lists conversations from other branches/commits\n" +
         "  - `--all` includes collaborators' conversations\n",
     );

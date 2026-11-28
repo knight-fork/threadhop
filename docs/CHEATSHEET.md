@@ -65,7 +65,7 @@ where Bob did.
 
 ## 3. Sharing with teammates (private repos only)
 
-Off by default. To share a **private** repo's conversations with everyone who
+Off after `threadhop setup`, which turns sharing off on your machine. To share a **private** repo's conversations with everyone who
 can clone it, commit this file at the repo root, once:
 
 ```sh
@@ -114,7 +114,8 @@ threadhop mirror disable                      # removes threadhop's hooks
 npm rm -g threadhop                           # removes the commands (threadhop, thop, cledger)
 ```
 
-cledger has no uninstall command: delete the `cledger hook claude-code` entries
+Capture has no uninstall command yet. Do this before `npm rm`, or the hooks will
+fail once the command is gone: delete the entries ending in `hook claude-code`
 from `~/.claude/settings.json` and the `cledger install codex` block from
 `~/.codex/config.toml`, or restore the `.bak-*` copy saved next to each file
 before it was changed.
